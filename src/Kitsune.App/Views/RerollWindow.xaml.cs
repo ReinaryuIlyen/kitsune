@@ -46,7 +46,7 @@ public partial class RerollWindow : Window
         _rm = new RerollManager(state.Paths);
         InitializeComponent();
         _timer.Tick += (_, _) => RefreshRows();
-        Loaded += (_, _) => { RefreshSets(); _timer.Start(); };
+        Loaded += (_, _) => { RefreshSets(); RefreshMacros(); _timer.Start(); };
         Closed += (_, _) => _timer.Stop();
     }
 
@@ -84,7 +84,9 @@ public partial class RerollWindow : Window
                 {
                     SessionState.Starting => "starting...",
                     SessionState.Booting => $"booting... (adb {session.Running.AdbSerial})",
-                    SessionState.Running => $"running · booted in {session.BootSeconds:F0}s · adb {session.Running.AdbSerial} · gRPC {session.Running.GrpcPort}",
+                    SessionState.Running => session.IsPlaying
+                        ? $"running · {session.MacroStatus}"
+                        : $"running · booted in {session.BootSeconds:F0}s · adb {session.Running.AdbSerial} · gRPC {session.Running.GrpcPort}",
                     SessionState.Stopping => "stopping...",
                     SessionState.Exited => "exited" + (session.Error is null ? "" : ": " + session.Error),
                     SessionState.Failed => "failed: " + session.Error,
@@ -279,6 +281,38 @@ public partial class RerollWindow : Window
         }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "Reroll", MessageBoxButton.OK, MessageBoxImage.Warning); }
         finally { _busy = false; UpdateButtons(); RefreshRows(); }
+    }
+
+    // ---- macros on every clone ---------------------------------------------------------------
+
+    private IReadOnlyList<(string File, Core.Input.Macro Macro)> _macros = [];
+
+    private void RefreshMacros()
+    {
+        var current = MacroCombo.SelectedItem as string ?? _state.Settings.LastMacro;
+        _macros = _main.LoadMacros();
+        MacroCombo.ItemsSource = _macros.Select(m => m.Macro.Name).ToList();
+        MacroCombo.SelectedItem = _macros.Select(m => m.Macro.Name).FirstOrDefault(n => n == current) ?? _macros.Select(m => m.Macro.Name).FirstOrDefault();
+    }
+
+    private async void PlayAllBtn_Click(object sender, RoutedEventArgs e)
+    {
+        var m = MacroCombo.SelectedItem is string name ? _macros.FirstOrDefault(x => x.Macro.Name == name) : default;
+        if (m.Macro is null) { Status.Text = "Pick a macro first (record one from the main window with F8)."; return; }
+        int repeat = int.TryParse(MacroRepeatBox.Text.Trim(), out var r) ? Math.Max(0, r) : 0;
+        var targets = _rows.Select(row => _main.Sessions.TryGetValue(row.Name, out var s) ? s : null)
+                           .Where(s => s is not null && s.State == SessionState.Running).Cast<EmulatorSession>().ToList();
+        if (targets.Count == 0) { Status.Text = "No running clones."; return; }
+        Status.Text = $"Playing '{m.Macro.Name}' on {targets.Count} clone(s)...";
+        var results = await Task.WhenAll(targets.Select(s => s.PlayMacroAsync(m.Macro, repeat)));
+        Status.Text = $"'{m.Macro.Name}' done: " + string.Join(", ", targets.Select((s, i) => $"{s.Instance.Name} {results[i]}x"));
+    }
+
+    private void StopMacrosBtn_Click(object sender, RoutedEventArgs e)
+    {
+        foreach (var row in _rows)
+            if (_main.Sessions.TryGetValue(row.Name, out var s)) s.StopMacro();
+        Status.Text = "Macros stopped.";
     }
 
     // ---- tiling ------------------------------------------------------------------------------

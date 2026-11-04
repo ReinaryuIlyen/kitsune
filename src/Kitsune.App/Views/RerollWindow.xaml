@@ -85,12 +85,22 @@
         <!-- Actions -->
         <DockPanel Grid.Row="3" Margin="0,10,0,0">
             <TextBlock DockPanel.Dock="Right" x:Name="Status" Style="{StaticResource Dim}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-            <StackPanel Orientation="Horizontal">
-                <Button x:Name="LaunchAllBtn" Content="Launch all" Style="{StaticResource Primary}" Click="LaunchAllBtn_Click"/>
-                <Button x:Name="StopAllBtn" Content="Stop all" Click="StopAllBtn_Click"/>
-                <Button x:Name="ResetAllBtn" Content="Reset all stopped" Click="ResetAllBtn_Click"/>
-                <Button x:Name="TileBtn" Content="Tile windows" Click="TileBtn_Click"/>
-                <Button x:Name="AddCloneBtn" Content="+ Clone" Click="AddCloneBtn_Click"/>
+            <StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <Button x:Name="LaunchAllBtn" Content="Launch all" Style="{StaticResource Primary}" Click="LaunchAllBtn_Click"/>
+                    <Button x:Name="StopAllBtn" Content="Stop all" Click="StopAllBtn_Click"/>
+                    <Button x:Name="ResetAllBtn" Content="Reset all stopped" Click="ResetAllBtn_Click"/>
+                    <Button x:Name="TileBtn" Content="Tile windows" Click="TileBtn_Click"/>
+                    <Button x:Name="AddCloneBtn" Content="+ Clone" Click="AddCloneBtn_Click"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                    <TextBlock Text="Macro" Style="{StaticResource Dim}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <ComboBox x:Name="MacroCombo" Width="260"/>
+                    <TextBlock Text="Repeat" Style="{StaticResource Dim}" VerticalAlignment="Center" Margin="12,0,6,0"/>
+                    <TextBox x:Name="MacroRepeatBox" Width="44" Text="0" ToolTip="0 = until stopped"/>
+                    <Button x:Name="PlayAllBtn" Content="Play on all running" Click="PlayAllBtn_Click" Margin="12,0,8,0"/>
+                    <Button x:Name="StopMacrosBtn" Content="Stop macros" Click="StopMacrosBtn_Click"/>
+                </StackPanel>
             </StackPanel>
         </DockPanel>
     </Grid>

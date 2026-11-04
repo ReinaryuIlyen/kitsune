@@ -26,5 +26,9 @@
                 Background="#CC1E2026" BorderBrush="#FFE8734A" BorderThickness="1" CornerRadius="6" Padding="10,4">
             <TextBlock Text="Mouse look on" FontSize="12"/>
         </Border>
+        <Border x:Name="MacroBanner" Visibility="Collapsed" VerticalAlignment="Bottom" HorizontalAlignment="Left" Margin="10,0,0,10"
+                Background="#CC1E2026" BorderBrush="#FFE05A5A" BorderThickness="1" CornerRadius="6" Padding="10,4">
+            <TextBlock x:Name="MacroBannerText" FontSize="12"/>
+        </Border>
     </Grid>
 </Window>

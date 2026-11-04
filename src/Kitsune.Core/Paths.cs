@@ -26,6 +26,7 @@ public sealed class KitsunePaths
     public string Downloads => Path.Combine(Root, "downloads");
     public string Logs => Path.Combine(Root, "logs");
     public string Profiles => Path.Combine(Root, "profiles");
+    public string Macros => Path.Combine(Root, "macros");
     public string SettingsFile => Path.Combine(Root, "settings.json");
     public string InstalledFile => Path.Combine(Sdk, "kitsune-installed.json");
 
@@ -49,7 +50,7 @@ public sealed class KitsunePaths
 
     public void EnsureDirectories()
     {
-        foreach (var d in new[] { Root, Sdk, AvdHome, EmulatorHome, Downloads, Logs, Profiles })
+        foreach (var d in new[] { Root, Sdk, AvdHome, EmulatorHome, Downloads, Logs, Profiles, Macros })
             Directory.CreateDirectory(d);
     }
 

@@ -27,7 +27,13 @@ public sealed class EmulatorSession : IDisposable
     public RunningEmulator Running { get; }
     public EmulatorControl Control { get; }
     public KeymapEngine Engine { get; }
+    /// <summary>Tees everything the engine sends; also receives host mouse input from the hooks while recording.</summary>
+    public MacroRecorder Recorder { get; }
+    public GrpcMacroTarget MacroTarget { get; }
     public WindowTracker Window { get; }
+    public MacroPlayer? Player { get; private set; }
+    public string MacroStatus { get; private set; } = "";
+    private CancellationTokenSource? _playCts;
     public SessionState State { get; private set; } = SessionState.Starting;
     public string? Error { get; private set; }
     public int GuestWidth { get; private set; }
@@ -40,15 +46,25 @@ public sealed class EmulatorSession : IDisposable
     public event Action? WindowMoved;
 
     public EmulatorSession(EmulatorLauncher launcher, Instance instance, HostInfo host, LaunchOptions options)
+        : this(instance, launcher.Launch(instance, host, options), instance.Config.AcceleratorOverride ?? host.Recommended) { }
+
+    /// <summary>Re-attaches to an emulator that is already running (started by the CLI, or by a launcher that was closed since).</summary>
+    public static EmulatorSession Attach(Instance instance, DiscoveredEmulator found, HostInfo host, string logFile) =>
+        new(instance, RunningEmulator.Attach(instance, found, logFile), instance.Config.AcceleratorOverride ?? host.Recommended);
+
+    private EmulatorSession(Instance instance, RunningEmulator running, Accelerator accelerator)
     {
         Instance = instance;
-        Running = launcher.Launch(instance, host, options);
-        Accelerator = instance.Config.AcceleratorOverride ?? host.Recommended;
+        Running = running;
+        Accelerator = accelerator;
         Control = new EmulatorControl(Running.GrpcPort);
-        Engine = new KeymapEngine(new GrpcInputSink(Control));
+        Recorder = new MacroRecorder(new GrpcInputSink(Control));
+        Engine = new KeymapEngine(Recorder);
         GuestWidth = instance.Config.Width;
         GuestHeight = instance.Config.Height;
         Engine.SetGuestDisplay(GuestWidth, GuestHeight);
+        Recorder.SetGuestDisplay(GuestWidth, GuestHeight);
+        MacroTarget = new GrpcMacroTarget(Control, GuestWidth, GuestHeight);
         Window = new WindowTracker(Running.WindowTitle);
 
         _timer = new DispatcherTimer(DispatcherPriority.Normal) { Interval = TimeSpan.FromMilliseconds(33) };
@@ -76,6 +92,13 @@ public sealed class EmulatorSession : IDisposable
             State = SessionState.Booting; Changed?.Invoke();
             var status = await Control.WaitForBootAsync(TimeSpan.FromMinutes(5), _cts.Token);
             BootSeconds = (DateTime.UtcNow - started).TotalSeconds;
+
+            // The port could belong to another emulator if ours failed to start: trust only an answer that names our AVD.
+            if (Running.HasExited)
+                throw new InvalidOperationException($"The emulator exited with code {Running.Process.ExitCode} (see the log). Something else answers on port {Running.GrpcPort}.");
+            var avdName = status.HardwareConfig.Entry.FirstOrDefault(e => e.Key == "avd.name")?.Value;
+            if (avdName is not null && !string.Equals(avdName, Instance.Name, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"Port {Running.GrpcPort} is answered by emulator '{avdName}', not '{Instance.Name}'.");
             // The control service does not always name AEHD; fall back to what the launcher selected.
             var hv = status.VmConfig.HypervisorType;
             HypervisorName = hv is VmConfiguration.Types.VmHypervisorType.Unknown or VmConfiguration.Types.VmHypervisorType.None
@@ -88,6 +111,8 @@ public sealed class EmulatorSession : IDisposable
                 {
                     GuestWidth = (int)primary.Width; GuestHeight = (int)primary.Height;
                     Engine.SetGuestDisplay(GuestWidth, GuestHeight);
+                    Recorder.SetGuestDisplay(GuestWidth, GuestHeight);
+                    MacroTarget.GuestWidth = GuestWidth; MacroTarget.GuestHeight = GuestHeight;
                 }
             }
             catch { }
@@ -152,8 +177,56 @@ public sealed class EmulatorSession : IDisposable
         }
     }
 
+    // ---- macros ------------------------------------------------------------------------------
+
+    public bool IsPlaying => _playCts is not null && !_playCts.IsCancellationRequested;
+
+    /// <summary>Plays a macro on this instance; the keymap keeps working alongside it. One macro at a time per instance.</summary>
+    public async Task<int> PlayMacroAsync(Macro macro, int repeat, double speed = 1.0)
+    {
+        StopMacro();
+        var cts = new CancellationTokenSource();
+        _playCts = cts;
+        Player = new MacroPlayer(MacroTarget) { Speed = speed };
+        Player.Progress += p => { MacroStatus = $"{macro.Name}: iteration {p.Iteration}, step {p.StepIndex}/{p.StepCount}, {p.Message}"; Changed?.Invoke(); };
+        MacroStatus = $"{macro.Name}: starting"; Changed?.Invoke();
+        try
+        {
+            int done = await Player.RunAsync(macro, repeat, cts.Token);
+            MacroStatus = $"{macro.Name}: finished {done} iteration(s)";
+            return done;
+        }
+        catch (OperationCanceledException) { MacroStatus = $"{macro.Name}: stopped"; return 0; }
+        catch (Exception ex) { MacroStatus = $"{macro.Name}: failed, {ex.Message}"; return 0; }
+        finally
+        {
+            if (_playCts == cts) _playCts = null;
+            cts.Dispose();
+            Changed?.Invoke();
+        }
+    }
+
+    public void StopMacro()
+    {
+        try { _playCts?.Cancel(); } catch { }
+    }
+
+    /// <summary>Captures a checkpoint around a guest point from the live screen and appends it to the current recording.</summary>
+    public async Task AddCheckpointAsync(double nx, double ny, double size, int tolerance, int timeoutMs)
+    {
+        if (!Recorder.Recording) return;
+        var (fw, fh) = ScreenMatcher.FrameSizeFor(GuestWidth, GuestHeight);
+        var (rgb, w, h) = await Control.GetFrameAsync(fw, fh);
+        double aspect = GuestWidth / (double)Math.Max(1, GuestHeight);
+        double nw = aspect >= 1 ? size / aspect : size, nh = aspect >= 1 ? size : size * aspect;
+        double x = Math.Clamp(nx - nw / 2, 0, 1 - nw), y = Math.Clamp(ny - nh / 2, 0, 1 - nh);
+        Recorder.AddCheckpoint(rgb, w, h, x, y, nw, nh, tolerance, timeoutMs, $"checkpoint {Recorder.StepCount + 1}");
+        Changed?.Invoke();
+    }
+
     public async Task StopAsync()
     {
+        StopMacro();
         State = SessionState.Stopping; Changed?.Invoke();
         Engine.Enabled = false;
         try
@@ -169,6 +242,7 @@ public sealed class EmulatorSession : IDisposable
 
     public void Dispose()
     {
+        StopMacro();
         _timer.Stop();
         _cts.Cancel();
         Engine.Dispose();

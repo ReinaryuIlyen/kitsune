@@ -23,12 +23,14 @@ internal static class Program
                 "install" => await Install(rest),
                 "aehd" => await Aehd(rest),
                 "list" => List(),
+                "ps" => Ps(),
                 "create" => Create(rest),
                 "delete" => Delete(rest),
                 "plan" => Plan(rest),
                 "launch" => await Launch(rest),
                 "ctl" => await Ctl(rest),
                 "reroll" => await Reroll(rest),
+                "macro" => await MacroCmd(rest),
                 "keymap" => Keymap(rest),
                 _ => Unknown(args[0]),
             };
@@ -56,6 +58,7 @@ internal static class Program
         Console.WriteLine("                                      Install or update emulator, adb, AEHD package and a system image");
         Console.WriteLine("  aehd status|install|uninstall       Manage the Android Emulator Hypervisor Driver (install/uninstall prompt for UAC)");
         Console.WriteLine("  list                                Instances");
+        Console.WriteLine("  ps                                  Emulators running right now, with their console and gRPC ports");
         Console.WriteLine("  create <name> [--api N] [--variant playstore|googleapis] [--profile ID] [--cores N] [--ram MB]");
         Console.WriteLine("  delete <name>");
         Console.WriteLine("  plan <name>                         Print the exact emulator command line and environment");
@@ -71,6 +74,12 @@ internal static class Program
         Console.WriteLine("  reroll keep <set> <clone#> <new-instance>   Flatten a winning clone into a normal instance");
         Console.WriteLine("  reroll launch <set> [--count N] [--stagger ms] [--wait] [--attach]");
         Console.WriteLine("                                      Boot the clones in parallel; --attach keeps them until Ctrl+C");
+        Console.WriteLine("  macro list | validate <file>");
+        Console.WriteLine("  macro play <file> --grpc <port>[,port...] [--repeat N] [--speed X]");
+        Console.WriteLine("                                      Replay a recorded macro on one or more running instances");
+        Console.WriteLine("  macro checkpoint <file> --grpc <port> --at X,Y [--size 0.12] [--tolerance 14] [--timeout ms] [--label text]");
+        Console.WriteLine("                                      Append a wait-for-screen step captured from the live screen");
+        Console.WriteLine("  macro selftest                      Exercise the recorder, matcher and player against fakes");
         Console.WriteLine();
         Console.WriteLine("Device profiles:");
         foreach (var p in DeviceProfile.All) Console.WriteLine($"  {p.Id,-14} {p.DisplayName}");
@@ -187,6 +196,15 @@ internal static class Program
         return 0;
     }
 
+    private static int Ps()
+    {
+        var running = EmulatorDiscovery.Discover();
+        if (running.Count == 0) { Console.WriteLine("No emulator is running."); return 0; }
+        foreach (var r in running.OrderBy(r => r.ConsolePort))
+            Console.WriteLine($"{r.Avd,-20} pid {r.Pid,-6} console {r.ConsolePort}  adb emulator-{r.ConsolePort}  grpc {(r.GrpcPort > 0 ? r.GrpcPort.ToString() : "none")}");
+        return 0;
+    }
+
     private static int Create(string[] args)
     {
         var paths = KitsunePaths.Resolve();
@@ -284,7 +302,7 @@ internal static class Program
                 Console.WriteLine($"booted    {s.Booted}");
                 Console.WriteLine($"uptime    {s.Uptime / 1000.0:F1}s");
                 Console.WriteLine($"hypervisor {s.VmConfig.HypervisorType}, {s.VmConfig.NumberOfCpuCores} cores, {s.VmConfig.RamSizeBytes / 1048576} MB");
-                foreach (var e in s.HardwareConfig.Entry.Where(e => e.Key.StartsWith("hw.gpu") || e.Key.StartsWith("hw.lcd") || e.Key.StartsWith("hw.cpu") || e.Key == "hw.ramSize"))
+                foreach (var e in s.HardwareConfig.Entry.Where(e => e.Key.StartsWith("avd.") || e.Key.StartsWith("hw.gpu") || e.Key.StartsWith("hw.lcd") || e.Key.StartsWith("hw.cpu") || e.Key == "hw.ramSize"))
                     Console.WriteLine($"  {e.Key} = {e.Value}");
                 return 0;
             }
@@ -487,6 +505,90 @@ internal static class Program
         {
             if (!int.TryParse(text.TrimStart('#'), out var idx)) throw new ArgumentException("Clone number expected.");
             return set.Clones.FirstOrDefault(c => c.Index == idx) ?? throw new ArgumentException($"No clone #{idx} in {set.Name}.");
+        }
+    }
+
+    private static async Task<int> MacroCmd(string[] args)
+    {
+        var paths = KitsunePaths.Resolve();
+        var sub = args.Length > 0 ? args[0] : "list";
+        var a = args.Skip(1).ToArray();
+        switch (sub)
+        {
+            case "list":
+            {
+                if (!Directory.Exists(paths.Macros)) { Console.WriteLine("No macros yet."); return 0; }
+                foreach (var f in Directory.EnumerateFiles(paths.Macros, "*.json").OrderBy(f => f))
+                {
+                    try { var m = Macro.Load(f); Console.WriteLine($"{Path.GetFileName(f),-32} {m.Name,-24} {m.Steps.Count,4} steps  {m.DurationMs / 1000.0,6:F1}s  {m.Steps.Count(s => s.Kind == MacroStepKind.WaitForScreen)} checkpoints  {m.GuestWidth}x{m.GuestHeight}"); }
+                    catch (Exception ex) { Console.WriteLine($"{Path.GetFileName(f),-32} unreadable: {ex.Message}"); }
+                }
+                return 0;
+            }
+            case "validate":
+            {
+                var m = Macro.Load(Positional(a, 0, "macro file"));
+                var problems = m.Validate();
+                Console.WriteLine($"{m.Name}: {m.Steps.Count} steps, {m.DurationMs} ms, {(problems.Count == 0 ? "OK" : problems.Count + " problem(s)")}");
+                foreach (var p in problems) Console.WriteLine("  " + p);
+                return problems.Count == 0 ? 0 : 4;
+            }
+            case "checkpoint":
+            {
+                var file = Positional(a, 0, "macro file");
+                var m = File.Exists(file) ? Macro.Load(file) : new Macro { Name = Path.GetFileNameWithoutExtension(file) };
+                int port = int.Parse(Opt(a, "--grpc") ?? throw new ArgumentException("--grpc <port> is required."));
+                var at = (Opt(a, "--at") ?? throw new ArgumentException("--at X,Y is required.")).Split(',');
+                double cx = double.Parse(at[0], System.Globalization.CultureInfo.InvariantCulture), cy = double.Parse(at[1], System.Globalization.CultureInfo.InvariantCulture);
+                double size = double.TryParse(Opt(a, "--size"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var sz) ? sz : 0.12;
+                int tol = int.TryParse(Opt(a, "--tolerance"), out var t) ? t : 14;
+                int timeout = int.TryParse(Opt(a, "--timeout"), out var to) ? to : 30000;
+                await using var control = new EmulatorControl(port);
+                var displays = await control.GetDisplaysAsync();
+                var d = displays.Displays.First(x => x.Display == 0);
+                var (fw, fh) = ScreenMatcher.FrameSizeFor((int)d.Width, (int)d.Height);
+                var (rgb, w, h) = await control.GetFrameAsync(fw, fh);
+                // Square region of `size` of the shorter side, centred on the point, clamped to the screen.
+                double aspect = d.Width / (double)d.Height;
+                double nw = aspect >= 1 ? size / aspect : size, nh = aspect >= 1 ? size : size * aspect;
+                double nx = Math.Clamp(cx - nw / 2, 0, 1 - nw), ny = Math.Clamp(cy - nh / 2, 0, 1 - nh);
+                var step = ScreenMatcher.MakeCheckpoint(rgb, w, h, nx, ny, nw, nh, tol, timeout, Opt(a, "--label"));
+                step.T = m.DurationMs;
+                m.Steps.Add(step);
+                if (m.GuestWidth == 0) { m.GuestWidth = (int)d.Width; m.GuestHeight = (int)d.Height; }
+                m.Save(file);
+                Console.WriteLine($"Added checkpoint {step.TemplateW}x{step.TemplateH} px at region ({nx:F3},{ny:F3}) {nw:F3}x{nh:F3} from a {w}x{h} frame -> {file}");
+                return 0;
+            }
+            case "play":
+            {
+                var m = Macro.Load(Positional(a, 0, "macro file"));
+                var problems = m.Validate();
+                foreach (var p in problems) Console.WriteLine("warning: " + p);
+                var ports = (Opt(a, "--grpc") ?? throw new ArgumentException("--grpc <port>[,port...] is required.")).Split(',').Select(int.Parse).ToList();
+                int repeat = int.TryParse(Opt(a, "--repeat"), out var r) ? r : m.Repeat;
+                double speed = double.TryParse(Opt(a, "--speed"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var sp) ? sp : 1.0;
+                using var cts = new CancellationTokenSource();
+                Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+                var runs = ports.Select(async port =>
+                {
+                    await using var control = new EmulatorControl(port);
+                    var displays = await control.GetDisplaysAsync(cts.Token);
+                    var d = displays.Displays.First(x => x.Display == 0);
+                    var player = new MacroPlayer(new GrpcMacroTarget(control, (int)d.Width, (int)d.Height)) { Speed = speed };
+                    string last = "";
+                    player.Progress += p => { var line = $"[{port}] it {p.Iteration} step {p.StepIndex}/{p.StepCount}: {p.Message}"; if (line != last) { Console.WriteLine(line); last = line; } };
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    int done = await player.RunAsync(m, repeat, cts.Token);
+                    Console.WriteLine($"[{port}] finished {done} iteration(s) in {sw.Elapsed.TotalSeconds:F1}s");
+                });
+                try { await Task.WhenAll(runs); } catch (OperationCanceledException) { Console.WriteLine("stopped"); }
+                return 0;
+            }
+            case "selftest":
+                return MacroSelfTest.Run();
+            default:
+                return Unknown("macro " + sub);
         }
     }
 

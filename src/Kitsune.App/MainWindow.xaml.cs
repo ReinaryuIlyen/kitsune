@@ -10,6 +10,7 @@ using Kitsune.Core.Emulator;
 using Kitsune.Core.Host;
 using Kitsune.Core.Input;
 using Kitsune.Core.Sdk;
+using Macro = Kitsune.Core.Input.Macro;
 
 namespace Kitsune.App;
 
@@ -32,17 +33,24 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _logTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private IReadOnlyList<(string File, KeymapProfile Profile)> _profiles = [];
     private bool _installing;
+    private int _discoveryTick;
 
     public MainWindow()
     {
         InitializeComponent();
         ShowBadgesBox.IsChecked = _state.Settings.ShowOverlayBadges;
         _hooks.IsActive = HooksActive;
-        _hooks.OnKey = (vk, down) => ActiveSession()?.Engine.OnKey(vk, down) == true;
-        _hooks.OnMouseButton = (b, down, x, y) => ActiveSession()?.Engine.OnMouseButton(b, down, x, y) == true;
-        _hooks.OnMouseMove = (dx, dy, x, y) => ActiveSession()?.Engine.OnMouseMove(dx, dy, x, y) == true;
+        _hooks.OnKey = OnHookKey;
+        _hooks.OnMouseButton = OnHookMouseButton;
+        _hooks.OnMouseMove = OnHookMouseMove;
         _hooks.OnWheel = delta => ActiveSession()?.Engine.OnWheel(delta) == true;
-        _logTimer.Tick += (_, _) => RefreshLog();
+        _logTimer.Tick += (_, _) =>
+        {
+            RefreshLog();
+            if (SelectedSession?.Recorder.Recording == true || SelectedSession?.IsPlaying == true) RefreshMacroButtons();
+            // Emulators started elsewhere (CLI, an earlier launcher) show up as attachable within a few seconds.
+            if (SelectedSession is null && ++_discoveryTick % 3 == 0) RefreshSelected();
+        };
         _logTimer.Start();
         Loaded += (_, _) =>
         {
@@ -70,7 +78,70 @@ public partial class MainWindow : Window
         var s = ActiveSession();
         if (s is null) return false;
         if (_overlays.TryGetValue(s.Instance.Name, out var o) && o.EditMode) return false;
-        return s.Engine.Enabled;
+        // Macro hotkeys and mouse recording must work even while the keymap is paused.
+        return true;
+    }
+
+    private bool OnHookKey(int vk, bool down)
+    {
+        var s = ActiveSession();
+        if (s is null) return false;
+        if (HostKeys.TryParse(_state.Settings.RecordKey, out var rec) && HostKeys.Matches(rec, vk))
+        {
+            if (down) Dispatcher.BeginInvoke(() => ToggleRecording(s));
+            return true;
+        }
+        if (HostKeys.TryParse(_state.Settings.CheckpointKey, out var cp) && HostKeys.Matches(cp, vk))
+        {
+            if (down && s.Recorder.Recording)
+            {
+                Win32.GetCursorPos(out var pt);
+                var (gx, gy) = s.Engine.CursorToGuest(pt.X, pt.Y);
+                double nx = gx / (double)Math.Max(1, s.GuestWidth - 1), ny = gy / (double)Math.Max(1, s.GuestHeight - 1);
+                var st = _state.Settings;
+                _ = s.AddCheckpointAsync(nx, ny, st.CheckpointSize, st.CheckpointTolerance, st.CheckpointTimeoutMs);
+            }
+            return true;
+        }
+        if (HostKeys.TryParse(_state.Settings.StopMacroKey, out var stop) && HostKeys.Matches(stop, vk))
+        {
+            if (down) s.StopMacro();
+            return true;
+        }
+        return s.Engine.Enabled && s.Engine.OnKey(vk, down);
+    }
+
+    private bool OnHookMouseButton(HostMouseButton b, bool down, int x, int y)
+    {
+        var s = ActiveSession();
+        if (s is null) return false;
+        bool consumed = s.Engine.Enabled && s.Engine.OnMouseButton(b, down, x, y);
+        // A left click the emulator window handles itself is still part of a recording.
+        if (!consumed && b == HostMouseButton.Left && s.Recorder.Recording && InViewport(s, x, y))
+        {
+            var (gx, gy) = s.Engine.CursorToGuest(x, y);
+            s.Recorder.RecordMouse(gx, gy, down);
+        }
+        return consumed;
+    }
+
+    private bool OnHookMouseMove(int dx, int dy, int x, int y)
+    {
+        var s = ActiveSession();
+        if (s is null) return false;
+        bool consumed = s.Engine.Enabled && s.Engine.OnMouseMove(dx, dy, x, y);
+        if (!consumed && s.Recorder.Recording && InViewport(s, x, y))
+        {
+            var (gx, gy) = s.Engine.CursorToGuest(x, y);
+            s.Recorder.RecordMouse(gx, gy, null);
+        }
+        return consumed;
+    }
+
+    private static bool InViewport(EmulatorSession s, int x, int y)
+    {
+        var r = s.Window.DisplayRect;
+        return x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom;
     }
 
     // ---- refresh -----------------------------------------------------------------------------
@@ -80,6 +151,7 @@ public partial class MainWindow : Window
         RefreshHeader();
         RefreshInstances();
         RefreshProfiles();
+        RefreshMacros();
         RefreshSelected();
     }
 
@@ -131,6 +203,7 @@ public partial class MainWindow : Window
         var inst = Selected;
         var session = SelectedSession;
         bool running = session is not null && session.State is SessionState.Starting or SessionState.Booting or SessionState.Running;
+        var orphan = inst is not null && !running ? EmulatorDiscovery.Find(inst.Name) : null;
         if (inst is null)
         {
             InstanceTitle.Text = "No instance selected";
@@ -144,7 +217,9 @@ public partial class MainWindow : Window
             var c = inst.Config;
             InstanceTitle.Text = inst.Name;
             InstanceDetails.Text = $"{c.SystemImage}\n{c.Width} x {c.Height} @ {c.Density} dpi, {c.RefreshRate} Hz · {c.Cores} vCPU · {c.RamMb} MB RAM · GPU {c.Gpu}{(c.Vulkan ? " + Vulkan" : "")}{(c.Quickboot ? " · quick boot" : " · cold boot")}";
-            StateText.Text = session is null ? "Not running." : session.State switch
+            StateText.Text = orphan is not null
+                ? $"Running outside the launcher (pid {orphan.Pid}, console {orphan.ConsolePort}, gRPC {orphan.GrpcPort}). Attach to control it here."
+                : session is null ? "Not running." : session.State switch
             {
                 SessionState.Starting => "Starting emulator...",
                 SessionState.Booting => $"Booting (console {session.Running.ConsolePort}, gRPC {session.Running.GrpcPort})...",
@@ -157,8 +232,9 @@ public partial class MainWindow : Window
             };
             KeymapEnabledBox.IsChecked = session?.KeymapEnabled ?? true;
         }
-        LaunchBtn.IsEnabled = inst is not null && !running && _state.EmulatorVersion is not null;
+        LaunchBtn.IsEnabled = inst is not null && !running && orphan is null && _state.EmulatorVersion is not null;
         ColdBtn.IsEnabled = LaunchBtn.IsEnabled;
+        AttachBtn.Visibility = orphan is not null && orphan.GrpcPort > 0 ? Visibility.Visible : Visibility.Collapsed;
         StopBtn.IsEnabled = running;
         EditBtn.IsEnabled = inst is not null && !running;
         FocusBtn.IsEnabled = session?.State == SessionState.Running;
@@ -166,6 +242,7 @@ public partial class MainWindow : Window
         DeleteBtn.IsEnabled = inst is not null && !running;
         EditOverlayBtn.IsEnabled = session?.State == SessionState.Running && ProfileCombo.SelectedItem is not null;
         KeymapEnabledBox.IsEnabled = session?.State == SessionState.Running;
+        RefreshMacroButtons();
     }
 
     private void RefreshLog()
@@ -261,6 +338,35 @@ public partial class MainWindow : Window
 
     private void LaunchBtn_Click(object sender, RoutedEventArgs e) => Launch(cold: false);
     private void ColdBtn_Click(object sender, RoutedEventArgs e) => Launch(cold: true);
+
+    private void AttachBtn_Click(object sender, RoutedEventArgs e)
+    {
+        if (Selected is not { } inst) return;
+        try { AttachSession(inst); }
+        catch (Exception ex) { MessageBox.Show(this, ex.Message, "Cannot attach", MessageBoxButton.OK, MessageBoxImage.Error); }
+        RefreshSelected();
+    }
+
+    /// <summary>Takes over an emulator found running for this instance, with overlay and hooks like a launched one.</summary>
+    internal EmulatorSession AttachSession(Instance inst)
+    {
+        var found = EmulatorDiscovery.Find(inst.Name) ?? throw new InvalidOperationException($"No running emulator for '{inst.Name}'.");
+        if (found.GrpcPort <= 0) throw new InvalidOperationException("That emulator was started without a gRPC port; Kitsune cannot control it. Stop it and launch it from here.");
+        if (_sessions.TryGetValue(inst.Name, out var old)) { old.Dispose(); _sessions.Remove(inst.Name); }
+        if (_overlays.TryGetValue(inst.Name, out var oldOverlay)) { oldOverlay.Close(); _overlays.Remove(inst.Name); }
+
+        var logFile = Path.Combine(_state.Paths.Logs, $"{inst.Name}-attached-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+        File.WriteAllText(logFile, $"# attached to pid {found.Pid}: {found.CommandLine}\n");
+        var session = EmulatorSession.Attach(inst, found, _state.Host, logFile);
+        _sessions[inst.Name] = session;
+        session.Changed += () => Dispatcher.BeginInvoke(() => { RefreshSelected(); RefreshHeader(); });
+        var overlay = new OverlayWindow(session, _hooks) { ShowBadges = _state.Settings.ShowOverlayBadges };
+        _overlays[inst.Name] = overlay;
+        ApplyProfile(session, overlay);
+        overlay.ProfileSaved += profile => OnProfileSaved(inst, profile);
+        overlay.Show();
+        return session;
+    }
 
     public void LaunchByName(string name)
     {
@@ -438,6 +544,111 @@ public partial class MainWindow : Window
         RefreshProfiles();
         ProfileCombo.SelectedItem = profile.Name;
     }
+
+    // ---- macros ------------------------------------------------------------------------------
+
+    private IReadOnlyList<(string File, Macro Macro)> _macros = [];
+
+    private void RefreshMacros()
+    {
+        var current = MacroCombo.SelectedItem as string ?? _state.Settings.LastMacro;
+        var list = new List<(string, Macro)>();
+        if (Directory.Exists(_state.Paths.Macros))
+            foreach (var f in Directory.EnumerateFiles(_state.Paths.Macros, "*.json").OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+            {
+                try { list.Add((f, Macro.Load(f))); } catch { }
+            }
+        _macros = list;
+        MacroCombo.ItemsSource = _macros.Select(m => m.Macro.Name).ToList();
+        MacroCombo.SelectedItem = _macros.Select(m => m.Macro.Name).FirstOrDefault(n => n == current) ?? _macros.Select(m => m.Macro.Name).FirstOrDefault();
+        RefreshMacroButtons();
+    }
+
+    private (string File, Macro Macro)? SelectedMacro =>
+        MacroCombo.SelectedItem is string name ? _macros.FirstOrDefault(m => m.Macro.Name == name) : null;
+
+    private void RefreshMacroButtons()
+    {
+        var s = SelectedSession;
+        bool running = s?.State == SessionState.Running;
+        bool recording = s?.Recorder.Recording == true;
+        MacroRecordBtn.Content = recording ? $"Stop recording (F8) · {s!.Recorder.StepCount} steps" : "Record (F8)";
+        MacroRecordBtn.IsEnabled = running;
+        MacroPlayBtn.IsEnabled = running && !recording && SelectedMacro is not null && s?.IsPlaying != true;
+        MacroStopBtn.IsEnabled = s?.IsPlaying == true;
+        MacroDeleteBtn.IsEnabled = SelectedMacro is not null;
+        MacroStatusText.Text = s is null ? "" : recording ? $"recording {s.Recorder.ElapsedMs / 1000.0:F1}s" : s.MacroStatus;
+    }
+
+    private void ToggleRecording(EmulatorSession s)
+    {
+        if (s.State != SessionState.Running) return;
+        if (!s.Recorder.Recording)
+        {
+            s.StopMacro();
+            var name = $"{s.Instance.Name} {DateTime.Now:yyyy-MM-dd HH-mm-ss}";
+            s.Recorder.Start(name);
+            MacroStatusText.Text = "recording";
+        }
+        else
+        {
+            var macro = s.Recorder.Stop();
+            if (macro is not null && macro.Steps.Count > 0)
+            {
+                Directory.CreateDirectory(_state.Paths.Macros);
+                var file = Path.Combine(_state.Paths.Macros, SafeName(macro.Name) + ".json");
+                macro.Save(file);
+                _state.Settings.LastMacro = macro.Name;
+                RefreshMacros();
+                MacroCombo.SelectedItem = macro.Name;
+                MacroStatusText.Text = $"saved {macro.Steps.Count} steps ({macro.DurationMs / 1000.0:F1}s) to {Path.GetFileName(file)}";
+            }
+            else MacroStatusText.Text = "nothing recorded";
+        }
+        RefreshMacroButtons();
+    }
+
+    private static string SafeName(string name) =>
+        string.Concat(name.Select(c => char.IsLetterOrDigit(c) || c is '-' or '_' or ' ' or '.' ? c : '_')).Trim();
+
+    private void MacroRecordBtn_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedSession is { } s) ToggleRecording(s);
+    }
+
+    private async void MacroPlayBtn_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedSession is not { } s || SelectedMacro is not { } m) return;
+        int repeat = int.TryParse(MacroRepeatBox.Text.Trim(), out var r) ? Math.Max(0, r) : 1;
+        double speed = double.TryParse(MacroSpeedBox.Text.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var sp) && sp > 0 ? sp : 1.0;
+        _state.Settings.LastMacro = m.Macro.Name;
+        RefreshMacroButtons();
+        await s.PlayMacroAsync(m.Macro, repeat, speed);
+        RefreshMacroButtons();
+    }
+
+    private void MacroStopBtn_Click(object sender, RoutedEventArgs e)
+    {
+        SelectedSession?.StopMacro();
+        RefreshMacroButtons();
+    }
+
+    private void MacroDeleteBtn_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedMacro is not { } m) return;
+        if (MessageBox.Show(this, $"Delete macro '{m.Macro.Name}'?", "Kitsune", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        try { File.Delete(m.File); } catch (Exception ex) { MessageBox.Show(this, ex.Message, "Kitsune"); }
+        RefreshMacros();
+    }
+
+    private void MacroCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (SelectedMacro is { } m) _state.Settings.LastMacro = m.Macro.Name;
+        RefreshMacroButtons();
+    }
+
+    /// <summary>For the reroll window: the macros on disk, freshly read.</summary>
+    internal IReadOnlyList<(string File, Macro Macro)> LoadMacros() { RefreshMacros(); return _macros; }
 
     // ---- components --------------------------------------------------------------------------
 

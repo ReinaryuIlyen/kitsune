@@ -11,6 +11,15 @@ public sealed class AppSettings
     public bool OverlayEnabled { get; set; } = true;
     public bool ShowOverlayBadges { get; set; } = true;
     public bool CheckRepositoryOnStart { get; set; } = false;
+    public string? LastMacro { get; set; }
+    /// <summary>Host key names (see HostKeys) for the macro hotkeys. They are reserved while the emulator window is in front.</summary>
+    public string RecordKey { get; set; } = "F8";
+    public string CheckpointKey { get; set; } = "F9";
+    public string StopMacroKey { get; set; } = "F10";
+    /// <summary>Size of a checkpoint region as a fraction of the shorter screen side.</summary>
+    public double CheckpointSize { get; set; } = 0.12;
+    public int CheckpointTolerance { get; set; } = 14;
+    public int CheckpointTimeoutMs { get; set; } = 30000;
 
     public static AppSettings Load(KitsunePaths paths)
     {

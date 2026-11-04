@@ -71,6 +71,10 @@ Then run `src\Kitsune.App\bin\Release\net10.0-windows\Kitsune.exe` (or the unzip
 4. **Launch**. The first boot takes a minute, later boots resume from a snapshot in a few seconds.
 5. Pick a keymap profile, press **Edit on screen** and drag the badges onto the game's buttons.
 
+Closing the launcher never kills a running game. Open it again and any emulator it did not start
+(or started before it was closed) shows as "running outside the launcher" with an **Attach** button;
+attaching restores the keymap overlay, macros and the Stop button for it. `kitsune ps` lists them.
+
 Everything lives under `%LOCALAPPDATA%\Kitsune` (override with the `KITSUNE_HOME` environment
 variable, or drop an empty `kitsune.portable` file next to `Kitsune.exe` for a portable install).
 
@@ -81,6 +85,7 @@ The same engine is scriptable through `kitsune.exe`:
 ```
 kitsune probe                         host CPU, hypervisor, GPU, recommendation
 kitsune catalog                       what the repository offers
+kitsune ps                            emulators running right now, with console and gRPC ports
 kitsune install [--api 35] [--variant playstore|googleapis]
 kitsune aehd status|install|uninstall
 kitsune create <name> [--profile desktop-fhd] [--cores 8] [--ram 8192]
@@ -92,6 +97,8 @@ kitsune keymap selftest
 kitsune reroll create <set> --from <instance> [--count N] [--ram MB] [--cores N]
 kitsune reroll launch <set> [--count N] [--stagger ms] [--wait] [--attach]
 kitsune reroll list | add <set> [N] | reset <set> [clone#] | keep <set> <clone#> <new-instance> | delete <set>
+kitsune macro list | validate <file> | play <file> --grpc <port,...> [--repeat N] [--speed X]
+kitsune macro checkpoint <file> --grpc <port> --at X,Y [--size 0.12] [--tolerance 14] [--timeout ms]
 ```
 
 `Kitsune.exe --launch <name>` starts the GUI and that instance in one go, for desktop shortcuts.
@@ -121,6 +128,33 @@ Host key names: `A`..`Z`, `D0`..`D9`, `F1`..`F24`, `Space`, `Enter`, `Escape`, `
 Mapping is active only while the emulator window is in front, and pauses automatically while a
 text field in the guest has focus (the emulator reports that over gRPC), so chat boxes keep
 working without toggling anything.
+
+## Macros: click-by-click replay that survives lag
+
+A macro records what the guest actually received, not what the screen looked like: every touch
+contact (down, move, up) with its timestamp and normalized position, every Android key, and the
+keymapped input the engine generated. Replay sends the same events through the gRPC input stream,
+so a recording made at 1080x2400 plays back on 1440x3120, and on every reroll clone at once.
+
+| Key | While the emulator window is in front |
+|---|---|
+| `F8` | Start or stop recording (the recording is saved to `macros\` and selected automatically). |
+| `F9` | Insert a **checkpoint** at the mouse cursor: a small reference crop of the screen around it. |
+| `F10` | Stop playback on that instance. |
+
+Checkpoints are what make replay robust. When playback reaches one, it polls a scaled frame
+several times a second and waits until that region matches the reference (mean grayscale
+difference within the tolerance), then shifts the rest of the timeline by however long it waited.
+Put one before every tap that follows a load, a network round trip or an animation and the macro
+cannot run ahead of the game. A checkpoint that never matches stops the run (configurable per step)
+rather than tapping blindly. That is the "babysit" mode: a macro that reaches its last checkpoint
+has verified every screen along the way.
+
+Macros are JSON in `%LOCALAPPDATA%\Kitsune\macros`; `kitsune macro validate` checks one,
+`kitsune macro play <file> --grpc 8554,8555,8556 --repeat 0` runs it on three instances until
+stopped, and `kitsune macro checkpoint` appends a checkpoint captured from a live instance to a
+hand-written macro. Use a landscape device profile for landscape games: coordinates are in the
+display's own orientation.
 
 ## Parallel reroll
 
@@ -161,7 +195,8 @@ Kitsune.Core
   Host/                CPUID + topology probe, AEHD service state, Vulkan ICDs, GPU preference
   Avd/                 device profiles, instance config, config.ini writer
   Emulator/            command line builder, process + log capture, gRPC control client
-  Input/               keymap model, engine (gestures, joystick, aim), gRPC input sink
+  Input/               keymap model, engine (gestures, joystick, aim), gRPC input sink,
+                       macro model, recorder, screen matcher, player
   Reroll/              frozen base + hard-linked overlay clones, keep/reset, qemu-img wrapper
   Protos/              emulator_controller.proto from AOSP external/qemu
 ```
@@ -185,6 +220,8 @@ Android 15 Google Play image r9:
 | gRPC touch | `getevent` shows the injected tap on `/dev/input/event2` with the expected scaled coordinates |
 | gRPC swipe and key | Swipe from the top edge opens the shade (screenshot differs), Back closes it (screenshot identical to before) |
 | Keymap engine | `kitsune keymap selftest`: 33 checks across every gesture kind |
+| Macro replay | A hand-built macro with two live screen checkpoints (home, quick-settings shade) replays twice in 3.4 s from the CLI and once more through the launcher; `kitsune macro selftest` covers recorder, matcher and player |
+| Attach | A CLI-started instance is discovered by a cold-started launcher, attached, driven (macro played) and stopped from it |
 
 Known limitation: AEHD 2.2 does not expose XSAVE/AVX to the guest (the emulator logs "host doesn't
 support requested feature: CPUID.01H:ECX.avx"). That is Google's driver, not a Kitsune setting; WHPX
@@ -196,8 +233,6 @@ exposes more CPU features but costs hypervisor overhead. Most mobile games never
   you need root; it has no Play Store.
 - No spoofing of device identity to defeat anti-emulator checks. Games that block emulators will
   still block this one.
-- No macro recorder yet. The input engine has the primitives (scripted gestures, timing), the
-  recorder UI is the obvious next step, and with it a reroll run can be driven across every clone.
 - No video capture, streaming, or "multi-instance sync" gimmicks.
 
 ## License

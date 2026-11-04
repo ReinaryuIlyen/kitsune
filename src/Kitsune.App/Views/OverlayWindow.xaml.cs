@@ -57,7 +57,7 @@ public partial class OverlayWindow : Window
         _session.Engine.AimModeChanged += on => Dispatcher.BeginInvoke(() => SetAim(on));
         _session.Engine.EnabledChanged += _ => Dispatcher.BeginInvoke(Rebuild);
         var vis = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
-        vis.Tick += (_, _) => UpdateVisibility();
+        vis.Tick += (_, _) => { UpdateVisibility(); UpdateMacroBanner(); };
         vis.Start();
         Closed += (_, _) => vis.Stop();
         KeyDown += Overlay_KeyDown;
@@ -85,13 +85,29 @@ public partial class OverlayWindow : Window
         Dispatcher.BeginInvoke(Rebuild, System.Windows.Threading.DispatcherPriority.Render);
     }
 
+    private void UpdateMacroBanner()
+    {
+        if (_session.Recorder.Recording)
+        {
+            MacroBannerText.Text = $"● REC {_session.Recorder.ElapsedMs / 1000.0:F0}s · {_session.Recorder.StepCount} steps · F9 checkpoint · F8 stop";
+            MacroBanner.Visibility = Visibility.Visible;
+        }
+        else if (_session.IsPlaying)
+        {
+            MacroBannerText.Text = "▶ " + _session.MacroStatus + " · F10 stop";
+            MacroBanner.Visibility = Visibility.Visible;
+        }
+        else MacroBanner.Visibility = Visibility.Collapsed;
+    }
+
     private void UpdateVisibility()
     {
         if (_hwnd == IntPtr.Zero) return;
         var w = _session.Window;
         bool running = _session.State == SessionState.Running;
         bool front = w.IsForeground() || IsForegroundWindow() || (Owner is not null && Owner.IsActive);
-        bool show = running && w.Found && !w.Minimized && (EditMode || _aim || front);
+        bool busy = _session.Recorder.Recording || _session.IsPlaying;
+        bool show = running && w.Found && !w.Minimized && (EditMode || _aim || front || busy);
         if (show && !IsVisible) { Show(); Reposition(); }
         else if (!show && IsVisible) Hide();
     }

@@ -82,5 +82,7 @@ public static class AndroidKeys
         return name is not null && Codes.TryGetValue(name.Trim(), out evdev);
     }
 
+    public static string? NameOf(int evdev) => Codes.FirstOrDefault(kv => kv.Value == evdev).Key;
+
     public static IEnumerable<string> AllNames => Codes.Keys.OrderBy(k => k);
 }

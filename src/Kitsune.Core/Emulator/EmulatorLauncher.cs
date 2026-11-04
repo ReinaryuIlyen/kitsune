@@ -39,6 +39,13 @@ public sealed class RunningEmulator : IDisposable
         Instance = instance; Process = process; ConsolePort = consolePort; GrpcPort = grpcPort; LogFile = logFile;
     }
 
+    /// <summary>Wraps an emulator this process did not start (found through <see cref="EmulatorDiscovery"/>).</summary>
+    public static RunningEmulator Attach(Instance instance, DiscoveredEmulator found, string logFile)
+    {
+        var process = Process.GetProcessById(found.Pid);
+        return new RunningEmulator(instance, process, found.ConsolePort, found.GrpcPort, logFile);
+    }
+
     public void Dispose() => Process.Dispose();
 }
 
@@ -193,11 +200,22 @@ public sealed class EmulatorLauncher
         throw new InvalidOperationException("No free TCP port for the gRPC control endpoint.");
     }
 
+    /// <summary>
+    /// A port is free when nothing listens on it and no connection uses it. A trial bind is not enough:
+    /// a listener that set SO_REUSEADDR (gRPC servers do) lets a second bind succeed on Windows.
+    /// </summary>
     private static bool IsFree(int port)
     {
         try
         {
-            using var listener = new TcpListener(IPAddress.Loopback, port);
+            var props = System.Net.NetworkInformation.IPGlobalProperties.GetIPGlobalProperties();
+            if (props.GetActiveTcpListeners().Any(e => e.Port == port)) return false;
+            if (props.GetActiveTcpConnections().Any(c => c.LocalEndPoint.Port == port)) return false;
+        }
+        catch { }
+        try
+        {
+            using var listener = new TcpListener(IPAddress.Loopback, port) { ExclusiveAddressUse = true };
             listener.Start();
             listener.Stop();
             return true;

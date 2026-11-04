@@ -38,11 +38,14 @@ public sealed class EmulatorControl : IAsyncDisposable
         _client = new EmulatorController.EmulatorControllerClient(_channel);
     }
 
+    /// <summary>Unary calls get a deadline: a port with a dead or foreign listener must fail, not hang forever.</summary>
+    private static DateTime Deadline(int seconds = 10) => DateTime.UtcNow.AddSeconds(seconds);
+
     public async Task<EmulatorStatus> GetStatusAsync(CancellationToken ct = default) =>
-        await _client.getStatusAsync(new Empty(), cancellationToken: ct);
+        await _client.getStatusAsync(new Empty(), deadline: Deadline(), cancellationToken: ct);
 
     public async Task<DisplayConfigurations> GetDisplaysAsync(CancellationToken ct = default) =>
-        await _client.getDisplayConfigurationsAsync(new Empty(), cancellationToken: ct);
+        await _client.getDisplayConfigurationsAsync(new Empty(), deadline: Deadline(), cancellationToken: ct);
 
     /// <summary>Waits until the gRPC endpoint answers, then until the guest reports boot completed.</summary>
     public async Task<EmulatorStatus> WaitForBootAsync(TimeSpan timeout, CancellationToken ct = default)
@@ -64,12 +67,25 @@ public sealed class EmulatorControl : IAsyncDisposable
     }
 
     public async Task ShutdownAsync(CancellationToken ct = default) =>
-        await _client.setVmStateAsync(new VmRunState { State = VmRunState.Types.RunState.Shutdown }, cancellationToken: ct);
+        await _client.setVmStateAsync(new VmRunState { State = VmRunState.Types.RunState.Shutdown }, deadline: Deadline(), cancellationToken: ct);
 
     public async Task<byte[]> ScreenshotPngAsync(int display = 0, CancellationToken ct = default)
     {
-        var img = await _client.getScreenshotAsync(new ImageFormat { Format = ImageFormat.Types.ImgFormat.Png, Display = (uint)display }, cancellationToken: ct);
+        var img = await _client.getScreenshotAsync(new ImageFormat { Format = ImageFormat.Types.ImgFormat.Png, Display = (uint)display }, deadline: Deadline(20), cancellationToken: ct);
         return img.Image_.ToByteArray();
+    }
+
+    /// <summary>
+    /// A raw RGB888 frame, scaled by the emulator to at most <paramref name="width"/> x <paramref name="height"/>
+    /// (aspect preserved, never larger than the display). Cheap enough to poll several times a second.
+    /// </summary>
+    public async Task<(byte[] Rgb, int Width, int Height)> GetFrameAsync(int width, int height, int display = 0, CancellationToken ct = default)
+    {
+        var img = await _client.getScreenshotAsync(new ImageFormat
+        {
+            Format = ImageFormat.Types.ImgFormat.Rgb888, Width = (uint)width, Height = (uint)height, Display = (uint)display,
+        }, deadline: Deadline(), cancellationToken: ct);
+        return (img.Image_.ToByteArray(), (int)img.Format.Width, (int)img.Format.Height);
     }
 
     /// <summary>Queues an input event on the streaming call. Never blocks the caller.</summary>
