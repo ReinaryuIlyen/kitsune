@@ -1,0 +1,18 @@
+{
+  "Name": "Landscape action",
+  "Description": "WASD virtual stick on the left, skills on J K L U I O, Space for the main action. Drag the badges onto your game's buttons.",
+  "Orientation": "landscape",
+  "Bindings": [
+    { "Kind": "Joystick", "Up": "W", "Down": "S", "Left": "A", "Right": "D", "Label": "move", "X": 0.17, "Y": 0.72, "Radius": 0.14, "RampMs": 0 },
+    { "Kind": "Tap", "Key": "Space", "Label": "attack", "X": 0.88, "Y": 0.76 },
+    { "Kind": "Tap", "Key": "J", "Label": "skill 1", "X": 0.78, "Y": 0.84 },
+    { "Kind": "Tap", "Key": "K", "Label": "skill 2", "X": 0.74, "Y": 0.68 },
+    { "Kind": "Tap", "Key": "L", "Label": "skill 3", "X": 0.80, "Y": 0.54 },
+    { "Kind": "Tap", "Key": "U", "Label": "skill 4", "X": 0.90, "Y": 0.50 },
+    { "Kind": "Tap", "Key": "I", "Label": "dodge", "X": 0.94, "Y": 0.66 },
+    { "Kind": "Tap", "Key": "O", "Label": "ultimate", "X": 0.94, "Y": 0.88 },
+    { "Kind": "Tap", "Key": "Tab", "Label": "menu", "X": 0.04, "Y": 0.08 },
+    { "Kind": "AndroidKey", "Key": "Escape", "AndroidKey": "Back" },
+    { "Kind": "ToggleKeymap", "Key": "F12", "Label": "Toggle keymap" }
+  ]
+}

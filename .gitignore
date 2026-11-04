@@ -1,0 +1,11 @@
+bin/
+obj/
+.tmp/
+.vs/
+*.user
+*.suo
+/sdk/
+/avd/
+/downloads/
+/logs/
+/emulator-home/

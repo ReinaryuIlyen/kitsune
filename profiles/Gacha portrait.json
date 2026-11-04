@@ -1,0 +1,15 @@
+{
+  "Name": "Gacha portrait",
+  "Description": "Menu-driven games in portrait. Space taps under the cursor, wheel scrolls lists, Escape is Back.",
+  "Orientation": "portrait",
+  "Bindings": [
+    { "Kind": "TapAtCursor", "Key": "Space", "Label": "tap", "X": 0.5, "Y": 0.5 },
+    { "Kind": "Swipe", "Key": "WheelUp", "Label": "scroll up", "X": 0.5, "Y": 0.42, "ToX": 0.5, "ToY": 0.62, "DurationMs": 120 },
+    { "Kind": "Swipe", "Key": "WheelDown", "Label": "scroll down", "X": 0.5, "Y": 0.62, "ToX": 0.5, "ToY": 0.42, "DurationMs": 120 },
+    { "Kind": "Tap", "Key": "Enter", "Label": "confirm", "X": 0.5, "Y": 0.9 },
+    { "Kind": "Tap", "Key": "Q", "Label": "skip", "X": 0.92, "Y": 0.05 },
+    { "Kind": "Repeat", "Key": "F", "Label": "mash", "X": 0.5, "Y": 0.75, "IntervalMs": 70 },
+    { "Kind": "AndroidKey", "Key": "Escape", "AndroidKey": "Back" },
+    { "Kind": "ToggleKeymap", "Key": "F12", "Label": "Toggle keymap" }
+  ]
+}

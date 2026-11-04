@@ -1,0 +1,30 @@
+<Window x:Class="Kitsune.App.Views.OverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Kitsune overlay" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Topmost="True" ShowInTaskbar="False" ShowActivated="False" ResizeMode="NoResize" Width="100" Height="100">
+    <Grid>
+        <Canvas x:Name="BadgeCanvas" Background="Transparent"
+                MouseRightButtonUp="Canvas_MouseRightButtonUp" MouseLeftButtonDown="Canvas_MouseLeftButtonDown"/>
+        <Border x:Name="Toolbar" Visibility="Collapsed" VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,10,0,0"
+                Background="#EE1E2026" BorderBrush="#FF363A44" BorderThickness="1" CornerRadius="6" Padding="10,8">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock x:Name="ToolbarTitle" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                <Button Content="+ Tap" Click="AddTap_Click" Padding="8,4"/>
+                <Button Content="+ Joystick" Click="AddJoystick_Click" Padding="8,4"/>
+                <Button Content="+ Aim" Click="AddAim_Click" Padding="8,4"/>
+                <Button Content="+ Swipe" Click="AddSwipe_Click" Padding="8,4"/>
+                <Button Content="+ Autofire" Click="AddRepeat_Click" Padding="8,4"/>
+                <Button Content="+ Pinch" Click="AddPinch_Click" Padding="8,4"/>
+                <Button Content="+ Android key" Click="AddAndroidKey_Click" Padding="8,4"/>
+                <Button Content="Save" Click="Save_Click" Padding="10,4" Style="{StaticResource Primary}"/>
+                <Button Content="Cancel" Click="Cancel_Click" Padding="10,4"/>
+                <TextBlock Text="Drag to move · double-click to edit · Delete removes · right-click adds here" Style="{StaticResource Dim}" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </StackPanel>
+        </Border>
+        <Border x:Name="AimBanner" Visibility="Collapsed" VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,10,0,0"
+                Background="#CC1E2026" BorderBrush="#FFE8734A" BorderThickness="1" CornerRadius="6" Padding="10,4">
+            <TextBlock Text="Mouse look on" FontSize="12"/>
+        </Border>
+    </Grid>
+</Window>

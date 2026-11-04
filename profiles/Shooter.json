@@ -1,0 +1,20 @@
+{
+  "Name": "Shooter",
+  "Description": "WASD to move, F1 toggles mouse look, left click fires, R reloads, Space jumps, C crouches, 1/2 switch weapons.",
+  "Orientation": "landscape",
+  "Bindings": [
+    { "Kind": "Joystick", "Up": "W", "Down": "S", "Left": "A", "Right": "D", "Label": "move", "X": 0.16, "Y": 0.72, "Radius": 0.14, "RampMs": 0 },
+    { "Kind": "AimToggle", "Key": "F1", "Label": "look", "X": 0.62, "Y": 0.48, "Sensitivity": 1.0, "ResetRadius": 0.22, "InvertY": false },
+    { "Kind": "Tap", "Key": "LeftButton", "Label": "fire", "X": 0.86, "Y": 0.62 },
+    { "Kind": "Tap", "Key": "RightButton", "Label": "scope", "X": 0.93, "Y": 0.40 },
+    { "Kind": "Tap", "Key": "R", "Label": "reload", "X": 0.72, "Y": 0.88 },
+    { "Kind": "Tap", "Key": "Space", "Label": "jump", "X": 0.93, "Y": 0.56 },
+    { "Kind": "Tap", "Key": "C", "Label": "crouch", "X": 0.93, "Y": 0.78 },
+    { "Kind": "Tap", "Key": "D1", "Label": "weapon 1", "X": 0.42, "Y": 0.92 },
+    { "Kind": "Tap", "Key": "D2", "Label": "weapon 2", "X": 0.52, "Y": 0.92 },
+    { "Kind": "Tap", "Key": "G", "Label": "grenade", "X": 0.62, "Y": 0.90 },
+    { "Kind": "Tap", "Key": "E", "Label": "interact", "X": 0.80, "Y": 0.46 },
+    { "Kind": "AndroidKey", "Key": "Escape", "AndroidKey": "Back" },
+    { "Kind": "ToggleKeymap", "Key": "F12", "Label": "Toggle keymap" }
+  ]
+}

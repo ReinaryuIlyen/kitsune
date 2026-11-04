@@ -1,0 +1,82 @@
+<Window x:Class="Kitsune.App.Views.InstanceDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Style="{StaticResource {x:Type Window}}"
+        Title="Instance settings" Width="640" SizeToContent="Height" WindowStartupLocation="CenterOwner" ShowInTaskbar="False" ResizeMode="NoResize">
+    <StackPanel Margin="16">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="150"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
+                <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
+            </Grid.RowDefinitions>
+
+            <Label Grid.Row="0" Content="Name"/>
+            <TextBox Grid.Row="0" Grid.Column="1" x:Name="NameBox" Margin="0,2"/>
+
+            <Label Grid.Row="1" Content="System image"/>
+            <ComboBox Grid.Row="1" Grid.Column="1" x:Name="ImageCombo"/>
+
+            <Label Grid.Row="2" Content="Screen"/>
+            <ComboBox Grid.Row="2" Grid.Column="1" x:Name="ProfileCombo" SelectionChanged="ProfileCombo_SelectionChanged"/>
+
+            <Label Grid.Row="3" Content="Custom size"/>
+            <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Margin="0,2">
+                <TextBox x:Name="WidthBox" Width="70"/>
+                <TextBlock Text=" x " VerticalAlignment="Center"/>
+                <TextBox x:Name="HeightBox" Width="70"/>
+                <TextBlock Text="  @ " VerticalAlignment="Center"/>
+                <TextBox x:Name="DensityBox" Width="60"/>
+                <TextBlock Text=" dpi,  " VerticalAlignment="Center"/>
+                <TextBox x:Name="HzBox" Width="50"/>
+                <TextBlock Text=" Hz" VerticalAlignment="Center"/>
+            </StackPanel>
+
+            <Label Grid.Row="4" Content="CPU cores"/>
+            <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Margin="0,2">
+                <TextBox x:Name="CoresBox" Width="60"/>
+                <TextBlock x:Name="CoresHint" Style="{StaticResource Dim}" VerticalAlignment="Center" Margin="10,0,0,0"/>
+            </StackPanel>
+
+            <Label Grid.Row="5" Content="RAM (MB)"/>
+            <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Margin="0,2">
+                <TextBox x:Name="RamBox" Width="80"/>
+                <TextBlock x:Name="RamHint" Style="{StaticResource Dim}" VerticalAlignment="Center" Margin="10,0,0,0"/>
+            </StackPanel>
+
+            <Label Grid.Row="6" Content="Data partition (GB)"/>
+            <TextBox Grid.Row="6" Grid.Column="1" x:Name="DataBox" Width="80" HorizontalAlignment="Left" Margin="0,2"/>
+
+            <Label Grid.Row="7" Content="GPU"/>
+            <StackPanel Grid.Row="7" Grid.Column="1" Orientation="Horizontal" Margin="0,2">
+                <ComboBox x:Name="GpuCombo" Width="220"/>
+                <CheckBox x:Name="VulkanBox" Content="Vulkan" Margin="12,0,0,0"/>
+                <CheckBox x:Name="PinGpuBox" Content="Pin to discrete GPU" Margin="12,0,0,0"/>
+            </StackPanel>
+
+            <Label Grid.Row="8" Content="Accelerator"/>
+            <ComboBox Grid.Row="8" Grid.Column="1" x:Name="AccelCombo" Width="320" HorizontalAlignment="Left"/>
+
+            <Label Grid.Row="9" Content="Boot"/>
+            <StackPanel Grid.Row="9" Grid.Column="1" Orientation="Horizontal" Margin="0,2">
+                <CheckBox x:Name="QuickbootBox" Content="Quick boot (resume from snapshot)"/>
+                <CheckBox x:Name="AudioBox" Content="Audio" Margin="16,0,0,0"/>
+                <CheckBox x:Name="GpsBox" Content="GPS" Margin="16,0,0,0"/>
+                <CheckBox x:Name="CameraBox" Content="Cameras" Margin="16,0,0,0"/>
+            </StackPanel>
+
+            <Label Grid.Row="10" Content="Extra arguments"/>
+            <TextBox Grid.Row="10" Grid.Column="1" x:Name="ExtraBox" Margin="0,2" ToolTip="Appended to the emulator command line, space separated."/>
+
+            <TextBlock Grid.Row="11" Grid.Column="1" x:Name="Hint" Style="{StaticResource Dim}" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0"/>
+        </Grid>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button Content="Save" Style="{StaticResource Primary}" Click="Save_Click" IsDefault="True"/>
+            <Button Content="Cancel" IsCancel="True"/>
+        </StackPanel>
+    </StackPanel>
+</Window>

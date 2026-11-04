@@ -1,0 +1,142 @@
+<Window x:Class="Kitsune.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Style="{StaticResource {x:Type Window}}"
+        Title="Kitsune" Width="1040" Height="680" MinWidth="860" MinHeight="560"
+        WindowStartupLocation="CenterScreen">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Grid Grid.Row="0" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="Kitsune" Style="{StaticResource H1}"/>
+                <TextBlock Text="Android gaming emulator" Style="{StaticResource Dim}" Margin="12,6,0,0"/>
+            </StackPanel>
+            <WrapPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="4" Padding="8,4" Margin="6,0,0,0">
+                    <TextBlock x:Name="EmulatorChip" Text="Emulator: not installed"/>
+                </Border>
+                <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="4" Padding="8,4" Margin="6,0,0,0">
+                    <TextBlock x:Name="AccelChip" Text="Accelerator: -"/>
+                </Border>
+                <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="4" Padding="8,4" Margin="6,0,0,0">
+                    <TextBlock x:Name="GpuChip" Text="GPU: -"/>
+                </Border>
+            </WrapPanel>
+        </Grid>
+
+        <!-- Content -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="280"/>
+                <ColumnDefinition Width="16"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <DockPanel Grid.Column="0">
+                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
+                    <Button x:Name="NewBtn" Content="New" Click="NewBtn_Click"/>
+                    <Button x:Name="CloneBtn" Content="Clone" Click="CloneBtn_Click"/>
+                    <Button x:Name="DeleteBtn" Content="Delete" Click="DeleteBtn_Click"/>
+                </StackPanel>
+                <TextBlock DockPanel.Dock="Top" Text="Instances" Style="{StaticResource H2}" Margin="0,0,0,6"/>
+                <ListBox x:Name="InstanceList" SelectionChanged="InstanceList_SelectionChanged">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel>
+                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding Summary}" Style="{StaticResource Dim}" FontSize="11"/>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+
+            <Border Grid.Column="2" Background="{StaticResource Panel}" BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="6" Padding="14">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Grid.Row="0">
+                        <TextBlock x:Name="InstanceTitle" Text="No instance selected" Style="{StaticResource H1}"/>
+                        <TextBlock x:Name="InstanceDetails" Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,12,0,0">
+                        <Button x:Name="LaunchBtn" Content="Launch" Style="{StaticResource Primary}" Click="LaunchBtn_Click"/>
+                        <Button x:Name="ColdBtn" Content="Cold boot" Click="ColdBtn_Click"/>
+                        <Button x:Name="StopBtn" Content="Stop" Click="StopBtn_Click"/>
+                        <Button x:Name="EditBtn" Content="Settings" Click="EditBtn_Click"/>
+                        <Button x:Name="FocusBtn" Content="Show window" Click="FocusBtn_Click"/>
+                    </StackPanel>
+
+                    <TextBlock x:Name="StateText" Grid.Row="2" Margin="0,10,0,0" TextWrapping="Wrap"/>
+
+                    <GroupBox Grid.Row="3" Header="Keymap" Margin="0,12,0,8">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Label Grid.Row="0" Grid.Column="0" Content="Profile"/>
+                            <DockPanel Grid.Row="0" Grid.Column="1">
+                                <Button DockPanel.Dock="Right" x:Name="NewProfileBtn" Content="New profile" Click="NewProfileBtn_Click" Margin="8,0,0,0"/>
+                                <Button DockPanel.Dock="Right" x:Name="EditOverlayBtn" Content="Edit on screen" Click="EditOverlayBtn_Click" Margin="8,0,0,0"/>
+                                <ComboBox x:Name="ProfileCombo" SelectionChanged="ProfileCombo_SelectionChanged"/>
+                            </DockPanel>
+                            <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="0,6,0,0">
+                                <CheckBox x:Name="KeymapEnabledBox" Content="Keymap active" IsChecked="True" Click="KeymapEnabledBox_Click" Margin="0,0,16,0"/>
+                                <CheckBox x:Name="ShowBadgesBox" Content="Show key badges over the game" Click="ShowBadgesBox_Click"/>
+                            </StackPanel>
+                            <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Dim}" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"
+                                       Text="Mapping is live only while the emulator window is in front. It pauses by itself when a text field has focus in the guest. Keys bound to ToggleKeymap (F12 in the starter profiles) switch it on and off."/>
+                        </Grid>
+                    </GroupBox>
+
+                    <GroupBox Grid.Row="4" Header="Emulator log">
+                        <TextBox x:Name="LogBox" IsReadOnly="True" FontFamily="Cascadia Mono, Consolas" FontSize="11" TextWrapping="NoWrap"
+                                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" BorderThickness="0" Background="{StaticResource Bg}"/>
+                    </GroupBox>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Footer: components -->
+        <Border Grid.Row="2" Margin="0,12,0,0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="6" Padding="12,10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Button Grid.Column="0" x:Name="InstallBtn" Content="Install / update components" Click="InstallBtn_Click"/>
+                <Button Grid.Column="1" x:Name="ImagesBtn" Content="System images..." Click="ImagesBtn_Click"/>
+                <Button Grid.Column="2" x:Name="AehdBtn" Content="Install AEHD driver" Click="AehdBtn_Click"/>
+                <StackPanel Grid.Column="3" VerticalAlignment="Center" Margin="8,0,0,0">
+                    <TextBlock x:Name="InstallStatus" Style="{StaticResource Dim}" TextTrimming="CharacterEllipsis"/>
+                    <ProgressBar x:Name="InstallProgress" Margin="0,4,0,0" Visibility="Collapsed" Maximum="1"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

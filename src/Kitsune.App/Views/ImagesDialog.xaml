@@ -1,0 +1,37 @@
+<Window x:Class="Kitsune.App.Views.ImagesDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Style="{StaticResource {x:Type Window}}"
+        Title="System images" Width="720" Height="480" WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <TextBlock Grid.Row="0" TextWrapping="Wrap" Style="{StaticResource Dim}" Margin="0,0,0,10"
+                   Text="x86_64 images only: they run natively on your CPU and translate ARM-only games with the built-in libndk_translation. 'Google Play' images include the Play Store; 'Google APIs' images have no store but allow adb root."/>
+        <ListBox Grid.Row="1" x:Name="ImageList">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding Path}" Style="{StaticResource Dim}" FontSize="11"/>
+                        </StackPanel>
+                        <TextBlock Grid.Column="1" Text="{Binding Status}" VerticalAlignment="Center" Style="{StaticResource Dim}"/>
+                    </Grid>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <TextBlock x:Name="Status" Style="{StaticResource Dim}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+            <Button x:Name="InstallBtn" Content="Install selected" Style="{StaticResource Primary}" Click="InstallBtn_Click" IsEnabled="False"/>
+            <Button Content="Close" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>
