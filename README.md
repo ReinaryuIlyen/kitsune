@@ -46,13 +46,21 @@ mostly bloat. Kitsune adds only:
   must be off; they hold the hypervisor and AEHD cannot load beside them. If you need those,
   enable "Windows Hypervisor Platform" instead and Kitsune will use WHPX.
 
+## Download
+
+Prebuilt, self-contained builds are on the
+[releases page](https://github.com/ReinaryuIlyen/kitsune/releases) (`Kitsune-<version>-win-x64.zip`
+plus a `.sha256`). Unzip anywhere and run `Kitsune.exe`; no .NET install is required. The landing
+page for sharing is served from Cloudflare Pages; `site/deploy.ps1` fills `site/index.html` from the
+newest release and deploys it (`npx wrangler login` first).
+
 ## Quick start
 
 ```bash
 dotnet build Kitsune.slnx -c Release
 ```
 
-Then run `src\Kitsune.App\bin\Release\net10.0-windows\Kitsune.exe`:
+Then run `src\Kitsune.App\bin\Release\net10.0-windows\Kitsune.exe` (or the unzipped release):
 
 1. **Install / update components** downloads the emulator, adb, the AEHD driver package and the
    Android 15 Google Play image (about 2.1 GB).

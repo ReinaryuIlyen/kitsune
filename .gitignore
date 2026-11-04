@@ -11,3 +11,10 @@ obj/
 /emulator-home/
 /dist/
 /site-build/
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
