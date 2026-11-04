@@ -20,6 +20,8 @@ public partial class App : Application
         // Kitsune.exe --launch <instance>: start that instance right away (handy for desktop shortcuts).
         var idx = Array.IndexOf(e.Args, "--launch");
         if (idx >= 0 && idx + 1 < e.Args.Length) main.LaunchByName(e.Args[idx + 1]);
+        // Kitsune.exe --reroll: open the parallel reroll window right away.
+        if (Array.IndexOf(e.Args, "--reroll") >= 0) main.Dispatcher.BeginInvoke(main.OpenReroll);
     }
 
     private void OnUnhandled(object sender, DispatcherUnhandledExceptionEventArgs e)

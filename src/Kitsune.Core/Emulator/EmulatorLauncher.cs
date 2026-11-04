@@ -17,7 +17,9 @@ public sealed record LaunchOptions(
     bool Headless = false,
     int? ConsolePort = null,
     int? GrpcPort = null,
-    bool CaptureOutput = true);
+    bool CaptureOutput = true,
+    /// <summary>Neither load nor save a quick-boot snapshot (reroll clones: always a clean cold boot, no multi-GB RAM files).</summary>
+    bool NoSnapshot = false);
 
 /// <summary>A running emulator instance started by Kitsune.</summary>
 public sealed class RunningEmulator : IDisposable
@@ -78,7 +80,15 @@ public sealed class EmulatorLauncher
             "-feature", cfg.Vulkan ? "Vulkan" : "-Vulkan",
         };
         if (!cfg.Audio) args.Add("-no-audio");
-        if (!cfg.Quickboot || options.ColdBoot) args.Add("-no-snapshot-load");
+        if (options.NoSnapshot)
+        {
+            // No quick-boot at all. QuickbootFileBacked is the feature that maps guest RAM to
+            // snapshots/default_boot/ram.img from the moment the VM starts (a RAM-sized file per
+            // instance, written whether or not a snapshot is ever saved); off, RAM is plain memory.
+            args.Add("-no-snapshot"); args.Add("-no-snapshot-save");
+            args.Add("-feature"); args.Add("-QuickbootFileBacked");
+        }
+        else if (!cfg.Quickboot || options.ColdBoot) args.Add("-no-snapshot-load");
         if (options.WipeData) args.Add("-wipe-data");
         if (options.ReadOnly) args.Add("-read-only");
         if (options.Headless) args.Add("-no-window");
@@ -114,18 +124,31 @@ public sealed class EmulatorLauncher
         var logFile = Path.Combine(_paths.Logs, $"{inst.Name}-{DateTime.Now:yyyyMMdd-HHmmss}.log");
 
         bool capture = options?.CaptureOutput ?? true;
+        // Output is always redirected: an inherited console handle would keep the parent's pipe open for
+        // the emulator's whole life (a `kitsune launch | ...` pipeline would never finish). When not
+        // capturing, the streams are drained and discarded; a closed pipe is harmless to the emulator on Windows.
         var psi = new ProcessStartInfo
         {
             FileName = plan.Executable,
             WorkingDirectory = _paths.EmulatorDir,
             UseShellExecute = false,
-            RedirectStandardOutput = capture,
-            RedirectStandardError = capture,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            RedirectStandardInput = true,
             CreateNoWindow = true,
         };
         foreach (var a in plan.Arguments) psi.ArgumentList.Add(a);
         foreach (var kv in plan.Environment) psi.Environment[kv.Key] = kv.Value;
         psi.Environment["PATH"] = _paths.PlatformToolsDir + ";" + (psi.Environment.TryGetValue("PATH", out var p) ? p : "");
+
+        // With redirected streams .NET starts the child with handle inheritance on, so our own console
+        // handles (possibly a pipe from a calling shell) would leak into the emulator and keep that pipe
+        // open for its whole life. Make them non-inheritable first.
+        foreach (var std in new[] { STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE })
+        {
+            var h = GetStdHandle(std);
+            if (h != IntPtr.Zero && h != INVALID_HANDLE_VALUE) SetHandleInformation(h, HANDLE_FLAG_INHERIT, 0);
+        }
 
         var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start the emulator process.");
         var writer = new StreamWriter(logFile, append: false) { AutoFlush = true };
@@ -145,23 +168,28 @@ public sealed class EmulatorLauncher
         {
             writer.WriteLine("# output not captured (detached launch)");
             writer.Dispose();
+            process.OutputDataReceived += (_, _) => { };
+            process.ErrorDataReceived += (_, _) => { };
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
         }
+        try { process.StandardInput.Close(); } catch { }
 
         return new RunningEmulator(inst, process, plan.ConsolePort, plan.GrpcPort, logFile);
     }
 
-    /// <summary>Console ports are even numbers from 5554 to 5682; adb uses console+1.</summary>
-    public static int FindFreeConsolePort()
+    /// <summary>Console ports are even numbers from 5554 to 5682; adb uses console+1. <paramref name="reserved"/> skips ports handed out but not yet bound.</summary>
+    public static int FindFreeConsolePort(ISet<int>? reserved = null)
     {
         for (int port = 5554; port <= 5682; port += 2)
-            if (IsFree(port) && IsFree(port + 1)) return port;
+            if (!(reserved?.Contains(port) ?? false) && !(reserved?.Contains(port + 1) ?? false) && IsFree(port) && IsFree(port + 1)) return port;
         throw new InvalidOperationException("No free emulator console port between 5554 and 5682.");
     }
 
-    public static int FindFreeTcpPort(int start)
+    public static int FindFreeTcpPort(int start, ISet<int>? reserved = null)
     {
         for (int port = start; port < start + 200; port++)
-            if (IsFree(port)) return port;
+            if (!(reserved?.Contains(port) ?? false) && IsFree(port)) return port;
         throw new InvalidOperationException("No free TCP port for the gRPC control endpoint.");
     }
 
@@ -176,6 +204,16 @@ public sealed class EmulatorLauncher
         }
         catch (SocketException) { return false; }
     }
+
+    private const int STD_INPUT_HANDLE = -10, STD_OUTPUT_HANDLE = -11, STD_ERROR_HANDLE = -12;
+    private const uint HANDLE_FLAG_INHERIT = 1;
+    private static readonly IntPtr INVALID_HANDLE_VALUE = new(-1);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr GetStdHandle(int nStdHandle);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetHandleInformation(IntPtr hObject, uint dwMask, uint dwFlags);
 
     /// <summary>Kills the emulator and the QEMU child it spawns.</summary>
     public static void KillTree(RunningEmulator running)

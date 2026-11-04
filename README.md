@@ -89,6 +89,9 @@ kitsune launch <name> [--cold] [--wipe] [--headless] [--wait] [--attach]
 kitsune ctl <grpc-port> status|displays|screenshot f.png|tap X Y|swipe X0 Y0 X1 Y1 [ms]|key Back|shutdown
 kitsune keymap validate <file.json>
 kitsune keymap selftest
+kitsune reroll create <set> --from <instance> [--count N] [--ram MB] [--cores N]
+kitsune reroll launch <set> [--count N] [--stagger ms] [--wait] [--attach]
+kitsune reroll list | add <set> [N] | reset <set> [clone#] | keep <set> <clone#> <new-instance> | delete <set>
 ```
 
 `Kitsune.exe --launch <name>` starts the GUI and that instance in one go, for desktop shortcuts.
@@ -119,6 +122,35 @@ Mapping is active only while the emulator window is in front, and pauses automat
 text field in the guest has focus (the emulator reports that over gRPC), so chat boxes keep
 working without toggling anything.
 
+## Parallel reroll
+
+Rerolling means starting a game over and over until the opening pulls are good. Kitsune runs that
+in parallel from the **Parallel reroll...** button (or `kitsune reroll`):
+
+1. Set up one normal instance as the template: install the game, get it to the screen where a new
+   account begins, then stop it.
+2. Create a reroll set from it. The template's three writable disks (user data, cache, encryption
+   key) are flattened once into a frozen, read-only base. Each clone is a complete AVD whose disk
+   files are NTFS hard links to that base plus an empty qcow2 overlay, so a clone costs under a
+   megabyte until the game writes to it.
+3. Launch all. Clones boot in parallel, each with its own console, adb and gRPC ports. The keymap
+   overlay and hooks work on whichever clone is in front; **Tile windows** lays them out in a grid.
+4. **Keep** a winner: its overlay chain is flattened into a brand-new standalone instance, laid out
+   exactly as the emulator would have written it. **Reset** a loser: its overlay is recreated empty
+   and the next boot is the template again.
+
+Clones run without quick-boot (cold boot every time, no RAM-sized snapshot files); the set's RAM
+and vCPU budget per clone is yours to pick, and the launcher stops adding clones when the host has
+no memory left for another one (6 GB is always kept for the host and GPU translation).
+
+Measured on the reference machine with 3 clones of an Android 15 Play template at 3 GB / 2 vCPU:
+set creation 2.3 s, 1.78 GB of unique disk for the whole set, clones booting in 22 to 33 s in
+parallel, overlays at 40 to 180 MB after a boot and a session, keep 2.0 s. All three clones report
+the template's `android_id`, and a setting written on one is invisible on the others.
+
+This is plain instance cloning. Kitsune does not spoof hardware identity; a game that bans
+emulator rerolling will still see an emulator.
+
 ## How the pieces fit
 
 ```
@@ -130,6 +162,7 @@ Kitsune.Core
   Avd/                 device profiles, instance config, config.ini writer
   Emulator/            command line builder, process + log capture, gRPC control client
   Input/               keymap model, engine (gestures, joystick, aim), gRPC input sink
+  Reroll/              frozen base + hard-linked overlay clones, keep/reset, qemu-img wrapper
   Protos/              emulator_controller.proto from AOSP external/qemu
 ```
 
@@ -164,7 +197,7 @@ exposes more CPU features but costs hypervisor overhead. Most mobile games never
 - No spoofing of device identity to defeat anti-emulator checks. Games that block emulators will
   still block this one.
 - No macro recorder yet. The input engine has the primitives (scripted gestures, timing), the
-  recorder UI is the obvious next step.
+  recorder UI is the obvious next step, and with it a reroll run can be driven across every clone.
 - No video capture, streaming, or "multi-instance sync" gimmicks.
 
 ## License

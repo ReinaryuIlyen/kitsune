@@ -278,27 +278,67 @@ public partial class MainWindow : Window
     private void Launch(bool cold)
     {
         if (Selected is not { } inst) return;
-        _state.RefreshHost();
-        try
-        {
-            if (_sessions.TryGetValue(inst.Name, out var old)) { old.Dispose(); _sessions.Remove(inst.Name); }
-            if (_overlays.TryGetValue(inst.Name, out var oldOverlay)) { oldOverlay.Close(); _overlays.Remove(inst.Name); }
-
-            var session = new EmulatorSession(new EmulatorLauncher(_state.Paths), inst, _state.Host, new LaunchOptions(ColdBoot: cold));
-            _sessions[inst.Name] = session;
-            session.Changed += () => Dispatcher.BeginInvoke(() => { RefreshSelected(); RefreshHeader(); });
-
-            var overlay = new OverlayWindow(session, _hooks) { ShowBadges = _state.Settings.ShowOverlayBadges };
-            _overlays[inst.Name] = overlay;
-            ApplyProfile(session, overlay);
-            overlay.ProfileSaved += profile => OnProfileSaved(inst, profile);
-            overlay.Show();
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, ex.Message, "Cannot launch", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
+        try { StartSession(inst, new LaunchOptions(ColdBoot: cold)); }
+        catch (Exception ex) { MessageBox.Show(this, ex.Message, "Cannot launch", MessageBoxButton.OK, MessageBoxImage.Error); }
         RefreshSelected();
+    }
+
+    /// <summary>Every running emulator started from this launcher, keyed by instance name (reroll clones included).</summary>
+    internal IReadOnlyDictionary<string, EmulatorSession> Sessions => _sessions;
+
+    /// <summary>Starts an instance with its keymap overlay and registers it so the global hooks route to it when it is in front.</summary>
+    internal EmulatorSession StartSession(Instance inst, LaunchOptions options)
+    {
+        _state.RefreshHost();
+        if (_sessions.TryGetValue(inst.Name, out var old))
+        {
+            if (old.State is SessionState.Starting or SessionState.Booting or SessionState.Running)
+                throw new InvalidOperationException($"'{inst.Name}' is already running.");
+            old.Dispose(); _sessions.Remove(inst.Name);
+        }
+        if (_overlays.TryGetValue(inst.Name, out var oldOverlay)) { oldOverlay.Close(); _overlays.Remove(inst.Name); }
+
+        var session = new EmulatorSession(new EmulatorLauncher(_state.Paths), inst, _state.Host, options);
+        _sessions[inst.Name] = session;
+        session.Changed += () => Dispatcher.BeginInvoke(() => { RefreshSelected(); RefreshHeader(); });
+
+        var overlay = new OverlayWindow(session, _hooks) { ShowBadges = _state.Settings.ShowOverlayBadges };
+        _overlays[inst.Name] = overlay;
+        ApplyProfile(session, overlay);
+        overlay.ProfileSaved += profile => OnProfileSaved(inst, profile);
+        overlay.Show();
+        return session;
+    }
+
+    internal async Task StopSessionAsync(string name)
+    {
+        if (!_sessions.TryGetValue(name, out var session)) return;
+        if (session.State is SessionState.Starting or SessionState.Booting or SessionState.Running) await session.StopAsync();
+    }
+
+    internal void RefreshInstancesPublic() => RefreshInstances();
+
+    /// <summary>Arranges emulator windows in a grid over the primary monitor's work area. The emulator keeps its own aspect ratio inside each cell.</summary>
+    internal void TileWindows(IReadOnlyList<EmulatorSession> sessions)
+    {
+        if (sessions.Count == 0) return;
+        var scale = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
+        var wa = SystemParameters.WorkArea;
+        int left = (int)(wa.Left * scale), top = (int)(wa.Top * scale), width = (int)(wa.Width * scale), height = (int)(wa.Height * scale);
+        int cols = (int)Math.Ceiling(Math.Sqrt(sessions.Count * (double)width / height * 0.45));
+        cols = Math.Clamp(cols, 1, sessions.Count);
+        int rows = (int)Math.Ceiling(sessions.Count / (double)cols);
+        int cw = width / cols, ch = height / rows;
+        for (int i = 0; i < sessions.Count; i++)
+        {
+            var s = sessions[i];
+            int x = left + (i % cols) * cw, y = top + (i / cols) * ch;
+            // Fit the guest aspect inside the cell; the emulator snaps to its own ratio anyway.
+            double aspect = s.GuestWidth / (double)Math.Max(1, s.GuestHeight);
+            int w = cw - 8, h = (int)(w / aspect);
+            if (h > ch - 8) { h = ch - 8; w = (int)(h * aspect); }
+            Win32.SetWindowPos(s.Window.Hwnd, IntPtr.Zero, x + 4, y + 4, Math.Max(200, w), Math.Max(200, h), Win32.SWP_NOZORDER | Win32.SWP_NOACTIVATE | Win32.SWP_SHOWWINDOW);
+        }
     }
 
     private async void StopBtn_Click(object sender, RoutedEventArgs e)
@@ -308,6 +348,21 @@ public partial class MainWindow : Window
         await session.StopAsync();
         RefreshSelected();
     }
+
+    private void RerollBtn_Click(object sender, RoutedEventArgs e) => OpenReroll();
+
+    internal void OpenReroll()
+    {
+        if (_rerollWindow is null || !_rerollWindow.IsLoaded)
+        {
+            _rerollWindow = new RerollWindow(_state, this) { Owner = this };
+            _rerollWindow.Closed += (_, _) => { _rerollWindow = null; RefreshInstances(); };
+            _rerollWindow.Show();
+        }
+        else _rerollWindow.Activate();
+    }
+
+    private RerollWindow? _rerollWindow;
 
     private void FocusBtn_Click(object sender, RoutedEventArgs e)
     {

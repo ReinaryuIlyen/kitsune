@@ -1,0 +1,97 @@
+<Window x:Class="Kitsune.App.Views.RerollWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Style="{StaticResource {x:Type Window}}"
+        Title="Parallel reroll" Width="900" Height="620" MinWidth="760" MinHeight="480" WindowStartupLocation="CenterOwner">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Set picker -->
+        <DockPanel Grid.Row="0" Margin="0,0,0,10">
+            <TextBlock DockPanel.Dock="Left" Text="Set" Style="{StaticResource Dim}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+            <Button DockPanel.Dock="Right" x:Name="DeleteSetBtn" Content="Delete set" Click="DeleteSetBtn_Click" Margin="8,0,0,0"/>
+            <Button DockPanel.Dock="Right" x:Name="NewSetBtn" Content="New set..." Click="NewSetBtn_Click" Margin="8,0,0,0"/>
+            <ComboBox x:Name="SetCombo" SelectionChanged="SetCombo_SelectionChanged"/>
+        </DockPanel>
+
+        <!-- New set form -->
+        <Border Grid.Row="1" x:Name="NewSetPanel" Visibility="Collapsed" Background="{StaticResource Panel}" BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,10">
+            <StackPanel>
+                <TextBlock Text="New reroll set" Style="{StaticResource H2}" Margin="0,0,0,6"/>
+                <TextBlock Style="{StaticResource Dim}" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,8"
+                           Text="Pick a stopped instance that already has the game installed and sitting at the account-creation screen. Its disks are frozen once; every clone then boots from that state and writes only to its own few-megabyte overlay."/>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="110"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                    <Label Grid.Row="0" Content="Name"/>
+                    <TextBox Grid.Row="0" Grid.Column="1" x:Name="NewNameBox" Width="220" HorizontalAlignment="Left" Margin="0,2"/>
+                    <Label Grid.Row="1" Content="Template"/>
+                    <ComboBox Grid.Row="1" Grid.Column="1" x:Name="TemplateCombo" Width="320" HorizontalAlignment="Left"/>
+                    <Label Grid.Row="2" Content="Clones"/>
+                    <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="0,2">
+                        <TextBox x:Name="CountBox" Width="50" Text="4"/>
+                        <TextBlock Text="  RAM per clone (MB)" VerticalAlignment="Center" Style="{StaticResource Dim}"/>
+                        <TextBox x:Name="RamBox" Width="70" Text="3072" Margin="8,0,0,0"/>
+                        <TextBlock Text="  vCPUs" VerticalAlignment="Center" Style="{StaticResource Dim}"/>
+                        <TextBox x:Name="CoresBox" Width="40" Text="2" Margin="8,0,0,0"/>
+                        <CheckBox x:Name="SnapshotsBox" Content="Save snapshots (fast relaunch, uses RAM-sized disk per clone)" Margin="16,0,0,0"/>
+                    </StackPanel>
+                    <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Margin="0,8,0,0">
+                        <Button x:Name="CreateSetBtn" Content="Create" Style="{StaticResource Primary}" Click="CreateSetBtn_Click"/>
+                        <Button Content="Cancel" Click="CancelNewSet_Click"/>
+                        <TextBlock x:Name="CreateStatus" Style="{StaticResource Dim}" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <!-- Clones -->
+        <Border Grid.Row="2" Background="{StaticResource Panel}" BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="6" Padding="8">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Top" x:Name="SetInfo" Style="{StaticResource Dim}" Margin="4,0,0,6"/>
+                <ListBox x:Name="CloneList" HorizontalContentAlignment="Stretch" BorderThickness="0" Background="Transparent">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="120"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="1" Text="{Binding Status}" Style="{StaticResource Dim}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                    <Button Content="Launch" Padding="8,3" Click="CloneLaunch_Click" Tag="{Binding}" IsEnabled="{Binding CanLaunch}"/>
+                                    <Button Content="Stop" Padding="8,3" Click="CloneStop_Click" Tag="{Binding}" IsEnabled="{Binding IsRunning}"/>
+                                    <Button Content="Show" Padding="8,3" Click="CloneShow_Click" Tag="{Binding}" IsEnabled="{Binding IsRunning}"/>
+                                    <Button Content="Reset" Padding="8,3" Click="CloneReset_Click" Tag="{Binding}" IsEnabled="{Binding CanLaunch}"/>
+                                    <Button Content="Keep..." Padding="8,3" Click="CloneKeep_Click" Tag="{Binding}" IsEnabled="{Binding CanLaunch}" Margin="0"/>
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+        </Border>
+
+        <!-- Actions -->
+        <DockPanel Grid.Row="3" Margin="0,10,0,0">
+            <TextBlock DockPanel.Dock="Right" x:Name="Status" Style="{StaticResource Dim}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+            <StackPanel Orientation="Horizontal">
+                <Button x:Name="LaunchAllBtn" Content="Launch all" Style="{StaticResource Primary}" Click="LaunchAllBtn_Click"/>
+                <Button x:Name="StopAllBtn" Content="Stop all" Click="StopAllBtn_Click"/>
+                <Button x:Name="ResetAllBtn" Content="Reset all stopped" Click="ResetAllBtn_Click"/>
+                <Button x:Name="TileBtn" Content="Tile windows" Click="TileBtn_Click"/>
+                <Button x:Name="AddCloneBtn" Content="+ Clone" Click="AddCloneBtn_Click"/>
+            </StackPanel>
+        </DockPanel>
+    </Grid>
+</Window>

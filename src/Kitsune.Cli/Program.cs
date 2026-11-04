@@ -3,6 +3,7 @@ using Kitsune.Core.Avd;
 using Kitsune.Core.Emulator;
 using Kitsune.Core.Host;
 using Kitsune.Core.Input;
+using Kitsune.Core.Reroll;
 using Kitsune.Core.Sdk;
 
 namespace Kitsune.Cli;
@@ -27,6 +28,7 @@ internal static class Program
                 "plan" => Plan(rest),
                 "launch" => await Launch(rest),
                 "ctl" => await Ctl(rest),
+                "reroll" => await Reroll(rest),
                 "keymap" => Keymap(rest),
                 _ => Unknown(args[0]),
             };
@@ -63,6 +65,12 @@ internal static class Program
         Console.WriteLine("                                      Talk to a running instance over its gRPC control port");
         Console.WriteLine("  keymap validate <file.json>");
         Console.WriteLine("  keymap selftest                     Exercise every gesture type against a recording sink");
+        Console.WriteLine("  reroll create <set> --from <instance> [--count N] [--ram MB] [--cores N] [--snapshots]");
+        Console.WriteLine("                                      Freeze the instance's disks and create N copy-on-write clones");
+        Console.WriteLine("  reroll list | add <set> [N] | reset <set> [clone#] | remove <set> <clone#> | delete <set>");
+        Console.WriteLine("  reroll keep <set> <clone#> <new-instance>   Flatten a winning clone into a normal instance");
+        Console.WriteLine("  reroll launch <set> [--count N] [--stagger ms] [--wait] [--attach]");
+        Console.WriteLine("                                      Boot the clones in parallel; --attach keeps them until Ctrl+C");
         Console.WriteLine();
         Console.WriteLine("Device profiles:");
         foreach (var p in DeviceProfile.All) Console.WriteLine($"  {p.Id,-14} {p.DisplayName}");
@@ -339,6 +347,146 @@ internal static class Program
                 return 0;
             default:
                 return Unknown("ctl " + args[1]);
+        }
+    }
+
+    private static async Task<int> Reroll(string[] args)
+    {
+        var paths = KitsunePaths.Resolve();
+        var rm = new RerollManager(paths);
+        var sub = args.Length > 0 ? args[0] : "list";
+        var a = args.Skip(1).ToArray();
+        var progress = new Progress<string>(s => Console.WriteLine("  " + s));
+        switch (sub)
+        {
+            case "list":
+            {
+                var sets = rm.List();
+                if (sets.Count == 0) { Console.WriteLine("No reroll sets. Create one with: kitsune reroll create <set> --from <instance>"); return 0; }
+                foreach (var s in sets)
+                {
+                    Console.WriteLine($"{s.Name,-16} from {s.Template,-16} {s.Clones.Count} clones  {s.RamMb} MB / {s.Cores} cores  snapshots={(s.SaveSnapshots ? "yes" : "no")}");
+                    foreach (var c in s.Clones)
+                    {
+                        var dir = s.CloneDir(c);
+                        long bytes = RerollManager.CloneOwnedBytes(dir);
+                        Console.WriteLine($"    #{c.Index,-3} {c.Name,-20} {(RerollManager.IsAvdRunning(dir) ? "running" : "stopped"),-8} {bytes / 1048576.0,8:F1} MB written  reset {c.LastReset.LocalDateTime:g}");
+                    }
+                }
+                return 0;
+            }
+            case "create":
+            {
+                var name = Positional(a, 0, "set name");
+                var from = Opt(a, "--from") ?? throw new ArgumentException("--from <instance> is required.");
+                var template = new AvdManager(paths).Get(from) ?? throw new ArgumentException($"No instance named {from}.");
+                var host = HostProbe.Probe();
+                int ram = int.TryParse(Opt(a, "--ram"), out var r) ? r : 3072;
+                int count = int.TryParse(Opt(a, "--count"), out var n) ? n : Math.Clamp(RerollManager.MaxClonesFor(host, ram), 1, 4);
+                int cores = int.TryParse(Opt(a, "--cores"), out var c) ? c : 2;
+                var set = await rm.CreateAsync(name, template, count, ram, cores, Flag(a, "--snapshots"), progress);
+                Console.WriteLine($"Created set {set.Name}: {set.Clones.Count} clones of {template.Name} at {set.Dir}");
+                Console.WriteLine($"Host can run {RerollManager.MaxClonesFor(host, ram)} clones at {ram} MB each right now ({host.AvailableRamBytes / 1073741824.0:F1} GB free of {host.TotalRamBytes / 1073741824.0:F0} GB).");
+                return 0;
+            }
+            case "add":
+            {
+                var set = rm.Get(Positional(a, 0, "set name")) ?? throw new ArgumentException("No such set.");
+                int n = a.Length > 1 && int.TryParse(a[1], out var k) ? k : 1;
+                for (int i = 0; i < n; i++) { var cl = await rm.AddCloneAsync(set); Console.WriteLine($"added {cl.Name}"); }
+                return 0;
+            }
+            case "reset":
+            {
+                var set = rm.Get(Positional(a, 0, "set name")) ?? throw new ArgumentException("No such set.");
+                var targets = a.Length > 1 ? [CloneByIndex(set, a[1])] : set.Clones.ToArray();
+                foreach (var cl in targets) { await rm.ResetAsync(set, cl); Console.WriteLine($"reset {cl.Name}"); }
+                return 0;
+            }
+            case "remove":
+            {
+                var set = rm.Get(Positional(a, 0, "set name")) ?? throw new ArgumentException("No such set.");
+                var cl = CloneByIndex(set, Positional(a, 1, "clone number"));
+                await rm.RemoveCloneAsync(set, cl);
+                Console.WriteLine($"removed {cl.Name}");
+                return 0;
+            }
+            case "delete":
+            {
+                var set = rm.Get(Positional(a, 0, "set name")) ?? throw new ArgumentException("No such set.");
+                rm.Delete(set);
+                Console.WriteLine($"deleted set {set.Name}");
+                return 0;
+            }
+            case "keep":
+            {
+                var set = rm.Get(Positional(a, 0, "set name")) ?? throw new ArgumentException("No such set.");
+                var cl = CloneByIndex(set, Positional(a, 1, "clone number"));
+                var inst = await rm.KeepAsync(set, cl, Positional(a, 2, "new instance name"), progress);
+                Console.WriteLine($"Kept {cl.Name} as instance {inst.Name} at {inst.AvdDir}");
+                return 0;
+            }
+            case "launch":
+            {
+                var set = rm.Get(Positional(a, 0, "set name")) ?? throw new ArgumentException("No such set.");
+                int count = int.TryParse(Opt(a, "--count"), out var n) ? Math.Min(n, set.Clones.Count) : set.Clones.Count;
+                int stagger = int.TryParse(Opt(a, "--stagger"), out var st) ? st : 1500;
+                var host = HostProbe.Probe();
+                int fit = RerollManager.MaxClonesFor(host, set.RamMb);
+                if (count > fit)
+                {
+                    Console.WriteLine($"Only {fit} clone(s) fit in the {host.AvailableRamBytes / 1073741824.0:F1} GB currently free; launching {fit}.");
+                    count = fit;
+                }
+                var launcher = new EmulatorLauncher(paths);
+                var running = new List<RunningEmulator>();
+                var used = new HashSet<int>();
+                foreach (var cl in set.Clones.Take(count))
+                {
+                    RerollManager.TrimSnapshots(set, cl);
+                    var inst = rm.CloneInstance(set, cl);
+                    int console = EmulatorLauncher.FindFreeConsolePort(used);
+                    used.Add(console); used.Add(console + 1);
+                    int grpc = EmulatorLauncher.FindFreeTcpPort(8554, used);
+                    used.Add(grpc);
+                    var opts = new LaunchOptions(ConsolePort: console, GrpcPort: grpc, NoSnapshot: !set.SaveSnapshots, CaptureOutput: Flag(a, "--attach"));
+                    var r = launcher.Launch(inst, host, opts);
+                    running.Add(r);
+                    Console.WriteLine($"{cl.Name,-20} pid {r.Process.Id,-6} console {r.ConsolePort} adb {r.AdbSerial} grpc {r.GrpcPort}");
+                    if (stagger > 0) await Task.Delay(stagger);
+                }
+                if (Flag(a, "--wait") || Flag(a, "--attach"))
+                {
+                    var started = DateTime.UtcNow;
+                    var waits = running.Select(async r =>
+                    {
+                        await using var control = new EmulatorControl(r.GrpcPort);
+                        try
+                        {
+                            await control.WaitForBootAsync(TimeSpan.FromMinutes(8));
+                            Console.WriteLine($"{r.Instance.Name,-20} booted after {(DateTime.UtcNow - started).TotalSeconds:F0}s");
+                        }
+                        catch (Exception ex) { Console.WriteLine($"{r.Instance.Name,-20} FAILED: {ex.Message}"); }
+                    });
+                    await Task.WhenAll(waits);
+                }
+                if (Flag(a, "--attach"))
+                {
+                    Console.WriteLine("Attached. Ctrl+C stops every clone.");
+                    Console.CancelKeyPress += (_, e) => { e.Cancel = true; foreach (var r in running) EmulatorLauncher.KillTree(r); };
+                    await Task.WhenAll(running.Select(r => r.Process.WaitForExitAsync()));
+                    foreach (var cl in set.Clones.Take(count)) RerollManager.TrimSnapshots(set, cl);
+                }
+                return 0;
+            }
+            default:
+                return Unknown("reroll " + sub);
+        }
+
+        static RerollClone CloneByIndex(RerollSet set, string text)
+        {
+            if (!int.TryParse(text.TrimStart('#'), out var idx)) throw new ArgumentException("Clone number expected.");
+            return set.Clones.FirstOrDefault(c => c.Index == idx) ?? throw new ArgumentException($"No clone #{idx} in {set.Name}.");
         }
     }
 

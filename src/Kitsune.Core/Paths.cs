@@ -18,6 +18,9 @@ public sealed class KitsunePaths
     public string SystemImagesDir => Path.Combine(Sdk, "system-images");
     public string AehdDir => Path.Combine(Sdk, "extras", "google", "Android_Emulator_Hypervisor_Driver");
     public string AvdHome => Path.Combine(Root, "avd");
+    /// <summary>Reroll sets: a frozen base image plus copy-on-write clones, each a tiny AVD of its own.</summary>
+    public string RerollDir => Path.Combine(AvdHome, "reroll");
+    public string QemuImgExe => Path.Combine(EmulatorDir, "qemu-img.exe");
     /// <summary>ANDROID_EMULATOR_HOME: where the emulator keeps its own per-user files. Kept inside Root so nothing leaks into ~/.android.</summary>
     public string EmulatorHome => Path.Combine(Root, "emulator-home");
     public string Downloads => Path.Combine(Root, "downloads");

@@ -25,6 +25,7 @@ public sealed record HostInfo(
     bool WhpxAvailable,
     AehdState Aehd,
     long TotalRamBytes,
+    long AvailableRamBytes,
     IReadOnlyList<GpuInfo> Gpus,
     IReadOnlyList<VulkanIcd> VulkanIcds)
 {
@@ -67,8 +68,15 @@ public static class HostProbe
             hwVirt, hvPresent, hvVendor, whpx,
             AehdServiceState(),
             TotalRam(),
+            AvailableRam(),
             Gpus(),
             VulkanIcds());
+    }
+
+    private static long AvailableRam()
+    {
+        var status = new MEMORYSTATUSEX { dwLength = (uint)Marshal.SizeOf<MEMORYSTATUSEX>() };
+        return GlobalMemoryStatusEx(ref status) ? (long)status.ullAvailPhys : 0;
     }
 
     private static (string Name, string Vendor) CpuIdentity()

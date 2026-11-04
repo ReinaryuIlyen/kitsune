@@ -82,6 +82,7 @@
                         <Button x:Name="StopBtn" Content="Stop" Click="StopBtn_Click"/>
                         <Button x:Name="EditBtn" Content="Settings" Click="EditBtn_Click"/>
                         <Button x:Name="FocusBtn" Content="Show window" Click="FocusBtn_Click"/>
+                        <Button x:Name="RerollBtn" Content="Parallel reroll..." Click="RerollBtn_Click" ToolTip="Freeze this instance and run many copy-on-write clones at once"/>
                     </StackPanel>
 
                     <TextBlock x:Name="StateText" Grid.Row="2" Margin="0,10,0,0" TextWrapping="Wrap"/>
