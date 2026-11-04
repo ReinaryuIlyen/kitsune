@@ -9,3 +9,5 @@ obj/
 /downloads/
 /logs/
 /emulator-home/
+/dist/
+/site-build/

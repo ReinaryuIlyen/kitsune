@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kitsune</title>
+<meta name="description" content="A lean Android gaming emulator for Windows. No ads, no telemetry, no bloat.">
+<style>
+  :root { --bg:#15161a; --panel:#1e2026; --panel2:#262930; --border:#363a44; --text:#e6e6ea; --dim:#9a9da8; --accent:#e8734a; --good:#5fbf7a; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font: 16px/1.55 "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 48px 20px 80px; }
+  h1 { font-size: 44px; margin: 0; letter-spacing: -0.5px; }
+  h1 span { color: var(--accent); }
+  .tag { color: var(--dim); font-size: 18px; margin: 6px 0 28px; }
+  .cta { display:inline-block; background:var(--accent); color:#1a1208; font-weight:600; padding:14px 22px; border-radius:8px; text-decoration:none; font-size:17px; }
+  .cta:hover { filter: brightness(1.08); }
+  .sub { color: var(--dim); font-size: 14px; margin-top: 10px; }
+  .sub code { background: var(--panel2); padding: 2px 6px; border-radius: 4px; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 36px 0; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .card h3 { margin: 0 0 6px; font-size: 16px; }
+  .card p { margin: 0; color: var(--dim); font-size: 14px; }
+  h2 { font-size: 20px; margin: 36px 0 10px; }
+  ol, ul { padding-left: 22px; color: var(--text); }
+  li { margin: 6px 0; }
+  li code, p code { background: var(--panel2); padding: 2px 6px; border-radius: 4px; font-size: 14px; }
+  .note { border-left: 3px solid var(--accent); background: var(--panel); padding: 12px 16px; border-radius: 0 8px 8px 0; color: var(--dim); font-size: 14px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  td, th { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--dim); font-weight: 600; }
+  footer { margin-top: 48px; color: var(--dim); font-size: 13px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1><span>Kitsune</span></h1>
+  <p class="tag">A lean Android gaming emulator for Windows. No ads, no telemetry, no bloat. Just the fastest open emulator core there is, set up for games.</p>
+
+  <a class="cta" href="__DOWNLOAD_URL__">Download Kitsune __VERSION__ for Windows (64-bit)</a>
+  <p class="sub">Zip, about __SIZE__. Unzip anywhere and run <code>Kitsune.exe</code>. No installer, no .NET to install. SHA-256: <code>__SHA256__</code></p>
+
+  <div class="grid">
+    <div class="card"><h3>Google's emulator core</h3><p>The Android Emulator from AOSP, the one Android Studio ships. Apache-2.0, auditable, maintained by Google.</p></div>
+    <div class="card"><h3>Hardware acceleration</h3><p>Picks AEHD (Google's kernel driver, direct VT-x) or WHPX for you. Host OpenGL and Vulkan on your real GPU, pinned to the discrete card on laptops.</p></div>
+    <div class="card"><h3>ARM games run</h3><p>Google Play x86_64 images include libndk_translation, so arm64-only games work.</p></div>
+    <div class="card"><h3>Keymapper that doesn't lag</h3><p>Keyboard and mouse become multitouch through the emulator's gRPC control stream, straight into the virtual touchscreen. Joystick, autofire, swipes, pinch, mouse-look.</p></div>
+    <div class="card"><h3>Nothing phones home</h3><p>Metrics off, crash reporting off, no account, no launcher ads. It talks to dl.google.com only when you click install.</p></div>
+    <div class="card"><h3>Play Store built in</h3><p>Android 15 Google Play image by default; other versions one click away.</p></div>
+  </div>
+
+  <h2>Requirements</h2>
+  <ul>
+    <li>Windows 10 2004 or Windows 11, 64-bit, with VT-x or AMD-V enabled in the firmware.</li>
+    <li>About 3 GB of disk for the emulator and one Android image, 8 GB of RAM or more.</li>
+    <li>For the fastest path (AEHD): Hyper-V, Virtual Machine Platform, WSL2 and memory integrity off. If you need those, Kitsune uses WHPX instead.</li>
+  </ul>
+
+  <h2>First run</h2>
+  <ol>
+    <li>Unzip, run <code>Kitsune.exe</code>.</li>
+    <li>Click <strong>Install / update components</strong>. It downloads the emulator, adb and the Android 15 Play image (about 2.1 GB) from Google and verifies every checksum.</li>
+    <li>Click <strong>Install AEHD driver</strong> and accept the one UAC prompt (skip on Hyper-V machines).</li>
+    <li><strong>New</strong> to create an instance, then <strong>Launch</strong>. First boot takes under a minute; after that it resumes in seconds.</li>
+    <li>Pick a keymap profile and press <strong>Edit on screen</strong> to drag the key badges onto your game's buttons.</li>
+  </ol>
+
+  <div class="note">Windows SmartScreen may warn about an unsigned download the first time. Click "More info", then "Run anyway". The zip's SHA-256 above lets you check what you got.</div>
+
+  <h2>What it will not do</h2>
+  <table>
+    <tr><th>Root on Play images</th><td>Google does not allow it. Pick a "Google APIs" image if you need root; it has no Play Store.</td></tr>
+    <tr><th>Hide from anti-emulator checks</th><td>Games that refuse emulators will refuse this one.</td></tr>
+    <tr><th>More than 6 CPU cores</th><td>The emulator caps vCPUs at 6.</td></tr>
+  </table>
+
+  <footer>
+    Source and issues: <a href="__REPO_URL__">__REPO_URL__</a> · MIT licensed. The Android Emulator and system images are Google's and carry their own licenses.
+  </footer>
+</main>
+</body>
+</html>
