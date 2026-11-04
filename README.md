@@ -50,9 +50,9 @@ mostly bloat. Kitsune adds only:
 
 Prebuilt, self-contained builds are on the
 [releases page](https://github.com/ReinaryuIlyen/kitsune/releases) (`Kitsune-<version>-win-x64.zip`
-plus a `.sha256`). Unzip anywhere and run `Kitsune.exe`; no .NET install is required. The landing
-page for sharing is served from Cloudflare Pages; `site/deploy.ps1` fills `site/index.html` from the
-newest release and deploys it (`npx wrangler login` first).
+plus a `.sha256`). Unzip anywhere and run `Kitsune.exe`; no .NET install is required. The page to
+share with friends is <https://kitsune-emulator.pages.dev/>; `site/deploy.ps1` fills `site/index.html`
+from the newest release and redeploys it (`npx wrangler login` first).
 
 ## Quick start
 
