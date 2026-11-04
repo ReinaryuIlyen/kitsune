@@ -22,6 +22,9 @@ public sealed class SdkInstaller
     private readonly KitsunePaths _paths;
     private readonly HttpClient _http;
 
+    /// <summary>Longest silence tolerated in the middle of a download before it is abandoned (resumable).</summary>
+    public static TimeSpan StallTimeout { get; set; } = TimeSpan.FromSeconds(90);
+
     public SdkInstaller(KitsunePaths paths, HttpClient http)
     {
         _paths = paths;
@@ -116,12 +119,23 @@ public sealed class SdkInstaller
         await using var src = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
         await using var dst = new FileStream(zipPath, existing > 0 ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20, useAsync: true);
 
+        // The HttpClient itself has no timeout (a 1.5 GB image takes as long as it takes), so a connection
+        // that silently stalls is caught here: every chunk must arrive within StallTimeout or the download
+        // fails and the next attempt resumes from the bytes already on disk.
+        using var stall = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var buffer = new byte[1 << 20];
         long done = existing;
         var lastReport = DateTime.UtcNow;
         int read;
-        while ((read = await src.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
+        while (true)
         {
+            stall.CancelAfter(StallTimeout);
+            try { read = await src.ReadAsync(buffer, stall.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                throw new IOException($"The download of {name} stalled for {StallTimeout.TotalSeconds:F0} s ({done / 1048576.0:F0} of {archive.Size / 1048576.0:F0} MB received). Run the install again to resume.");
+            }
+            if (read <= 0) break;
             await dst.WriteAsync(buffer.AsMemory(0, read), ct).ConfigureAwait(false);
             done += read;
             if ((DateTime.UtcNow - lastReport).TotalMilliseconds > 100)

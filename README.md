@@ -69,7 +69,12 @@ Then run `src\Kitsune.App\bin\Release\net10.0-windows\Kitsune.exe` (or the unzip
 3. **New** creates an instance. Pick a screen profile; cores and RAM default to what the host
    probe recommends.
 4. **Launch**. The first boot takes a minute, later boots resume from a snapshot in a few seconds.
-5. Pick a keymap profile, press **Edit on screen** and drag the badges onto the game's buttons.
+5. **Install APK...** (or drop an `.apk`, `.apks` or `.xapk` onto the window) for games that are not on
+   the Play Store. Split bundles are installed in one transaction and their OBB files pushed along.
+6. Pick a keymap profile, press **Edit on screen** and drag the badges onto the game's buttons.
+
+**Screenshot** saves a PNG of the guest display to `screenshots\`, and **adb shell** opens a console on
+the instance. A component download can be cancelled; it resumes from where it stopped next time.
 
 Closing the launcher never kills a running game. Open it again and any emulator it did not start
 (or started before it was closed) shows as "running outside the launcher" with an **Attach** button;
@@ -88,9 +93,14 @@ kitsune catalog                       what the repository offers
 kitsune ps                            emulators running right now, with console and gRPC ports
 kitsune install [--api 35] [--variant playstore|googleapis]
 kitsune aehd status|install|uninstall
+kitsune list                          instances and their configuration
 kitsune create <name> [--profile desktop-fhd] [--cores 8] [--ram 8192]
+kitsune delete <name>
 kitsune plan <name>                   exact command line and environment the launcher will use
 kitsune launch <name> [--cold] [--wipe] [--headless] [--wait] [--attach]
+kitsune stop <name> [--force]         clean shutdown over gRPC, or kill
+kitsune apk <name> <file>...          install .apk / .apks / .xapk on the running instance
+kitsune adb <name> [args...]          adb against the running instance (no args: shell)
 kitsune ctl <grpc-port> status|displays|screenshot f.png|tap X Y|swipe X0 Y0 X1 Y1 [ms]|key Back|shutdown
 kitsune keymap validate <file.json>
 kitsune keymap selftest
@@ -127,7 +137,9 @@ Host key names: `A`..`Z`, `D0`..`D9`, `F1`..`F24`, `Space`, `Enter`, `Escape`, `
 
 Mapping is active only while the emulator window is in front, and pauses automatically while a
 text field in the guest has focus (the emulator reports that over gRPC), so chat boxes keep
-working without toggling anything.
+working without toggling anything. The gesture clock runs at 250 Hz; Kitsune raises the Windows
+timer resolution to 1 ms while an emulator is attached so swipes, autofire and mouse-look are not
+quantised to the default 15.6 ms tick.
 
 ## Macros: click-by-click replay that survives lag
 
@@ -194,7 +206,8 @@ Kitsune.Core
   Sdk/                 repository manifests, resumable SHA-1-verified downloads, atomic extract
   Host/                CPUID + topology probe, AEHD service state, Vulkan ICDs, GPU preference
   Avd/                 device profiles, instance config, config.ini writer
-  Emulator/            command line builder, process + log capture, gRPC control client
+  Emulator/            command line builder, process + log capture, gRPC control client,
+                       discovery of running emulators, adb (APK / bundle install, shell)
   Input/               keymap model, engine (gestures, joystick, aim), gRPC input sink,
                        macro model, recorder, screen matcher, player
   Reroll/              frozen base + hard-linked overlay clones, keep/reset, qemu-img wrapper
@@ -203,7 +216,11 @@ Kitsune.Core
 
 Instances are plain AVD folders (`avd\<name>.avd\config.ini` plus a `kitsune.json`), so the stock
 emulator tooling (`emulator -list-avds`, `adb`) sees them too. Logs for every launch are kept in
-`logs\`.
+`logs\`, screenshots in `screenshots\`.
+
+Every push builds the solution on Windows and runs `kitsune keymap selftest`, `kitsune macro selftest`
+and `kitsune keymap validate` over the bundled profiles (`.github/workflows/ci.yml`); tags `v*` publish
+a release.
 
 ## Verified on the reference machine
 

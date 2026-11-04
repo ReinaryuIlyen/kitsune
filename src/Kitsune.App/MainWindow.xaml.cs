@@ -33,7 +33,14 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _logTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private IReadOnlyList<(string File, KeymapProfile Profile)> _profiles = [];
     private bool _installing;
+    private CancellationTokenSource? _installCts;
     private int _discoveryTick;
+    // An emulator found running for the selected instance outside this launcher. Discovery is a WMI query
+    // (tens to hundreds of milliseconds), so it runs off the UI thread and only the cached answer is read
+    // on it: a stalled UI thread makes Windows drop the low-level input hooks.
+    private DiscoveredEmulator? _orphan;
+    private string? _orphanFor;
+    private bool _discovering;
 
     public MainWindow()
     {
@@ -49,13 +56,14 @@ public partial class MainWindow : Window
             RefreshLog();
             if (SelectedSession?.Recorder.Recording == true || SelectedSession?.IsPlaying == true) RefreshMacroButtons();
             // Emulators started elsewhere (CLI, an earlier launcher) show up as attachable within a few seconds.
-            if (SelectedSession is null && ++_discoveryTick % 3 == 0) RefreshSelected();
+            if (++_discoveryTick % 3 == 0) DiscoverOrphan();
         };
         _logTimer.Start();
         Loaded += (_, _) =>
         {
             try { _hooks.Install(); } catch (Exception ex) { StateText.Text = "Input hooks unavailable: " + ex.Message; }
             RefreshAll();
+            DiscoverOrphan();
         };
         Closing += (_, _) => { _hooks.Dispose(); foreach (var s in _sessions.Values) s.Dispose(); foreach (var o in _overlays.Values) o.Close(); };
     }
@@ -108,14 +116,15 @@ public partial class MainWindow : Window
             if (down) s.StopMacro();
             return true;
         }
-        return s.Engine.Enabled && s.Engine.OnKey(vk, down);
+        // The engine itself ignores everything but ToggleKeymap keys while it is paused.
+        return s.Engine.OnKey(vk, down);
     }
 
     private bool OnHookMouseButton(HostMouseButton b, bool down, int x, int y)
     {
         var s = ActiveSession();
         if (s is null) return false;
-        bool consumed = s.Engine.Enabled && s.Engine.OnMouseButton(b, down, x, y);
+        bool consumed = s.Engine.OnMouseButton(b, down, x, y);
         // A left click the emulator window handles itself is still part of a recording.
         if (!consumed && b == HostMouseButton.Left && s.Recorder.Recording && InViewport(s, x, y))
         {
@@ -129,7 +138,7 @@ public partial class MainWindow : Window
     {
         var s = ActiveSession();
         if (s is null) return false;
-        bool consumed = s.Engine.Enabled && s.Engine.OnMouseMove(dx, dy, x, y);
+        bool consumed = s.Engine.OnMouseMove(dx, dy, x, y);
         if (!consumed && s.Recorder.Recording && InViewport(s, x, y))
         {
             var (gx, gy) = s.Engine.CursorToGuest(x, y);
@@ -148,6 +157,7 @@ public partial class MainWindow : Window
 
     private void RefreshAll()
     {
+        _state.RefreshHost();
         RefreshHeader();
         RefreshInstances();
         RefreshProfiles();
@@ -155,9 +165,9 @@ public partial class MainWindow : Window
         RefreshSelected();
     }
 
+    /// <summary>Redraws the header chips from the cached host probe; callers that changed the host re-probe first.</summary>
     private void RefreshHeader()
     {
-        _state.RefreshHost();
         var h = _state.Host;
         var ver = _state.EmulatorVersion;
         EmulatorChip.Text = ver is null ? "Emulator: not installed" : $"Emulator {ver}";
@@ -203,7 +213,7 @@ public partial class MainWindow : Window
         var inst = Selected;
         var session = SelectedSession;
         bool running = session is not null && session.State is SessionState.Starting or SessionState.Booting or SessionState.Running;
-        var orphan = inst is not null && !running ? EmulatorDiscovery.Find(inst.Name) : null;
+        var orphan = inst is not null && !running && string.Equals(_orphanFor, inst.Name, StringComparison.OrdinalIgnoreCase) ? _orphan : null;
         if (inst is null)
         {
             InstanceTitle.Text = "No instance selected";
@@ -242,7 +252,32 @@ public partial class MainWindow : Window
         DeleteBtn.IsEnabled = inst is not null && !running;
         EditOverlayBtn.IsEnabled = session?.State == SessionState.Running && ProfileCombo.SelectedItem is not null;
         KeymapEnabledBox.IsEnabled = session?.State == SessionState.Running;
+        ApkBtn.IsEnabled = session?.State == SessionState.Running && !_apkInstalling && _state.Adb.Available;
+        ShotBtn.IsEnabled = session?.State == SessionState.Running;
+        AdbBtn.IsEnabled = session?.State == SessionState.Running && _state.Adb.Available;
         RefreshMacroButtons();
+    }
+
+    /// <summary>Looks for an emulator running the selected instance that this launcher did not start, off the UI thread.</summary>
+    private async void DiscoverOrphan()
+    {
+        var inst = Selected;
+        var session = SelectedSession;
+        bool running = session is not null && session.State is SessionState.Starting or SessionState.Booting or SessionState.Running;
+        if (inst is null || running)
+        {
+            if (_orphan is not null) { _orphan = null; _orphanFor = null; RefreshSelected(); }
+            return;
+        }
+        if (_discovering) return;
+        _discovering = true;
+        var name = inst.Name;
+        DiscoveredEmulator? found = null;
+        try { found = await Task.Run(() => EmulatorDiscovery.Find(name)); } catch { }
+        _discovering = false;
+        bool changed = found?.Pid != _orphan?.Pid || !string.Equals(name, _orphanFor, StringComparison.OrdinalIgnoreCase);
+        _orphan = found; _orphanFor = name;
+        if (changed) RefreshSelected();
     }
 
     private void RefreshLog()
@@ -269,6 +304,7 @@ public partial class MainWindow : Window
         RefreshProfiles();
         RefreshSelected();
         RefreshLog();
+        DiscoverOrphan();
     }
 
     private void NewBtn_Click(object sender, RoutedEventArgs e)
@@ -282,7 +318,7 @@ public partial class MainWindow : Window
         var cfg = new InstanceConfig
         {
             Name = NextName(),
-            SystemImage = images.FirstOrDefault(i => i.PackagePath == _state.Settings.DefaultImage).PackagePath is { Length: > 0 } p ? p : images[0].PackagePath,
+            SystemImage = images.Any(i => i.PackagePath == _state.Settings.DefaultImage) ? _state.Settings.DefaultImage : images[0].PackagePath,
             Cores = Defaults.Cores(_state.Host),
             RamMb = Defaults.RamMb(_state.Host),
         };
@@ -290,7 +326,12 @@ public partial class MainWindow : Window
         var dlg = new InstanceDialog(_state, cfg, isNew: true) { Owner = this };
         if (dlg.ShowDialog() == true)
         {
-            try { _state.Avds.Create(dlg.Config); _state.Settings.LastInstance = dlg.Config.Name; }
+            try
+            {
+                _state.Avds.Create(dlg.Config);
+                _state.Settings.LastInstance = dlg.Config.Name;
+                _state.Settings.DefaultImage = dlg.Config.SystemImage;
+            }
             catch (Exception ex) { MessageBox.Show(this, ex.Message, "Kitsune", MessageBoxButton.OK, MessageBoxImage.Error); }
             RefreshInstances();
         }
@@ -359,6 +400,7 @@ public partial class MainWindow : Window
         File.WriteAllText(logFile, $"# attached to pid {found.Pid}: {found.CommandLine}\n");
         var session = EmulatorSession.Attach(inst, found, _state.Host, logFile);
         _sessions[inst.Name] = session;
+        _orphan = null; _orphanFor = null;
         session.Changed += () => Dispatcher.BeginInvoke(() => { RefreshSelected(); RefreshHeader(); });
         var overlay = new OverlayWindow(session, _hooks) { ShowBadges = _state.Settings.ShowOverlayBadges };
         _overlays[inst.Name] = overlay;
@@ -473,6 +515,102 @@ public partial class MainWindow : Window
     private void FocusBtn_Click(object sender, RoutedEventArgs e)
     {
         if (SelectedSession is { } s && s.Window.Found) Win32.SetForegroundWindow(s.Window.Hwnd);
+    }
+
+    // ---- tools: apk, screenshot, adb ---------------------------------------------------------
+
+    private bool _apkInstalling;
+
+    private void ApkBtn_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedSession is not { State: SessionState.Running } s) return;
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Install on " + s.Instance.Name,
+            Filter = "Android packages (*.apk, *.apks, *.xapk)|*.apk;*.apks;*.xapk;*.zip|All files|*.*",
+            Multiselect = true,
+        };
+        if (dlg.ShowDialog(this) == true) _ = InstallApksAsync(s, dlg.FileNames);
+    }
+
+    private async Task InstallApksAsync(EmulatorSession s, IReadOnlyList<string> files)
+    {
+        if (_apkInstalling) { ToolsStatus.Text = "An install is already running."; return; }
+        _apkInstalling = true;
+        RefreshSelected();
+        var progress = new Progress<string>(m => ToolsStatus.Text = m);
+        try
+        {
+            int ok = 0;
+            foreach (var file in files)
+            {
+                if (s.State != SessionState.Running) { ToolsStatus.Text = "The instance stopped."; break; }
+                ToolsStatus.Text = $"Installing {Path.GetFileName(file)} on {s.Instance.Name}...";
+                var r = await s.InstallApkAsync(_state.Adb, file, progress);
+                if (r.Ok) ok++;
+                else
+                {
+                    ToolsStatus.Text = $"{Path.GetFileName(file)} failed.";
+                    MessageBox.Show(this, r.Output.Length > 0 ? r.Output : "adb reported an error.", $"Install {Path.GetFileName(file)}", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            }
+            if (ok > 0) ToolsStatus.Text = ok == 1 ? $"Installed {Path.GetFileName(files[0])} on {s.Instance.Name}." : $"Installed {ok} of {files.Count} packages on {s.Instance.Name}.";
+        }
+        finally
+        {
+            _apkInstalling = false;
+            RefreshSelected();
+        }
+    }
+
+    private static string[] DroppedPackages(DragEventArgs e) =>
+        e.Data.GetDataPresent(DataFormats.FileDrop) && e.Data.GetData(DataFormats.FileDrop) is string[] files && files.Length > 0 && files.All(AdbTools.IsInstallable)
+            ? files : [];
+
+    private void Window_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = SelectedSession is { State: SessionState.Running } && !_apkInstalling && DroppedPackages(e).Length > 0 ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void Window_Drop(object sender, DragEventArgs e)
+    {
+        e.Handled = true;
+        var files = DroppedPackages(e);
+        if (files.Length == 0) return;
+        if (SelectedSession is not { State: SessionState.Running } s) { ToolsStatus.Text = "Launch the instance first, then drop the APK."; return; }
+        _ = InstallApksAsync(s, files);
+    }
+
+    private async void ShotBtn_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedSession is not { State: SessionState.Running } s) return;
+        try
+        {
+            Directory.CreateDirectory(_state.Paths.Screenshots);
+            var file = Path.Combine(_state.Paths.Screenshots, $"{s.Instance.Name}-{DateTime.Now:yyyyMMdd-HHmmss}.png");
+            var png = await s.Control.ScreenshotPngAsync();
+            await File.WriteAllBytesAsync(file, png);
+            ToolsStatus.Text = "Saved " + file;
+        }
+        catch (Exception ex) { ToolsStatus.Text = "Screenshot failed: " + ex.Message; }
+    }
+
+    private void AdbBtn_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedSession is not { State: SessionState.Running } s) return;
+        try { _state.Adb.OpenShell(s.Running.AdbSerial); }
+        catch (Exception ex) { ToolsStatus.Text = "adb shell: " + ex.Message; }
+    }
+
+    private void ShotsFolderBtn_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Directory.CreateDirectory(_state.Paths.Screenshots);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", _state.Paths.Screenshots) { UseShellExecute = true });
+        }
+        catch (Exception ex) { ToolsStatus.Text = ex.Message; }
     }
 
     // ---- keymap ------------------------------------------------------------------------------
@@ -654,11 +792,11 @@ public partial class MainWindow : Window
 
     private async void InstallBtn_Click(object sender, RoutedEventArgs e)
     {
-        await RunInstall(async progress =>
+        await RunInstall(async (progress, ct) =>
         {
-            await _state.Components.InstallCoreAsync(progress, CancellationToken.None);
+            await _state.Components.InstallCoreAsync(progress, ct);
             if (_state.Components.InstalledImages().Count == 0)
-                await _state.Components.InstallImageAsync(Core.SystemImageRef.Parse(_state.Settings.DefaultImage), progress, CancellationToken.None);
+                await _state.Components.InstallImageAsync(Core.SystemImageRef.Parse(_state.Settings.DefaultImage), progress, ct);
         });
     }
 
@@ -666,14 +804,25 @@ public partial class MainWindow : Window
     {
         var dlg = new ImagesDialog(_state) { Owner = this };
         if (dlg.ShowDialog() == true && dlg.SelectedImage is { } image)
-            await RunInstall(progress => _state.Components.InstallImageAsync(image, progress, CancellationToken.None));
+            await RunInstall((progress, ct) => _state.Components.InstallImageAsync(image, progress, ct));
     }
 
-    private async Task RunInstall(Func<IProgress<DownloadProgress>, Task> work)
+    private void CancelInstallBtn_Click(object sender, RoutedEventArgs e)
+    {
+        CancelInstallBtn.IsEnabled = false;
+        InstallStatus.Text = "Cancelling...";
+        try { _installCts?.Cancel(); } catch { }
+    }
+
+    private async Task RunInstall(Func<IProgress<DownloadProgress>, CancellationToken, Task> work)
     {
         if (_installing) return;
         _installing = true;
+        using var cts = new CancellationTokenSource();
+        _installCts = cts;
         RefreshHeader();
+        CancelInstallBtn.Visibility = Visibility.Visible;
+        CancelInstallBtn.IsEnabled = true;
         InstallProgress.Visibility = Visibility.Visible;
         var progress = new Progress<DownloadProgress>(p =>
         {
@@ -691,8 +840,12 @@ public partial class MainWindow : Window
         try
         {
             _state.Components.InvalidateCatalog();
-            await work(progress);
+            await work(progress, cts.Token);
             InstallStatus.Text = "Components are up to date.";
+        }
+        catch (OperationCanceledException)
+        {
+            InstallStatus.Text = "Install cancelled. Finished downloads are kept and a partial one resumes next time.";
         }
         catch (Exception ex)
         {
@@ -701,6 +854,8 @@ public partial class MainWindow : Window
         finally
         {
             _installing = false;
+            _installCts = null;
+            CancelInstallBtn.Visibility = Visibility.Collapsed;
             InstallProgress.Visibility = Visibility.Collapsed;
             InstallProgress.IsIndeterminate = false;
             RefreshAll();
@@ -717,6 +872,7 @@ public partial class MainWindow : Window
         InstallStatus.Text = "Installing AEHD (waiting for UAC)...";
         var (ok, output) = await AehdInstaller.InstallAsync(_state.Paths);
         InstallStatus.Text = ok ? "AEHD installed and running." : "AEHD install did not complete. " + output;
+        _state.RefreshHost();
         RefreshHeader();
         RefreshSelected();
     }

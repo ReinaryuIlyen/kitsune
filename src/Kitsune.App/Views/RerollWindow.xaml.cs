@@ -33,7 +33,6 @@ public partial class RerollWindow : Window
     private readonly MainWindow _main;
     private readonly RerollManager _rm;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1) };
-    private readonly HashSet<int> _reservedPorts = [];
     private IReadOnlyList<RerollSet> _sets = [];
     private RerollSet? _set;
     private List<CloneRow> _rows = [];
@@ -175,10 +174,17 @@ public partial class RerollWindow : Window
         if (_set is null) return null;
         RerollManager.TrimSnapshots(_set, clone);
         var inst = _rm.CloneInstance(_set, clone);
-        int console = EmulatorLauncher.FindFreeConsolePort(_reservedPorts);
-        _reservedPorts.Add(console); _reservedPorts.Add(console + 1);
-        int grpc = EmulatorLauncher.FindFreeTcpPort(8554, _reservedPorts);
-        _reservedPorts.Add(grpc);
+        // Ports of sessions that are alive but may not have bound their sockets yet; a free-port scan alone
+        // would hand the same pair to two clones started within a second of each other.
+        var reserved = new HashSet<int>();
+        foreach (var s in _main.Sessions.Values)
+        {
+            if (s.State is not (SessionState.Starting or SessionState.Booting or SessionState.Running)) continue;
+            reserved.Add(s.Running.ConsolePort); reserved.Add(s.Running.ConsolePort + 1); reserved.Add(s.Running.GrpcPort);
+        }
+        int console = EmulatorLauncher.FindFreeConsolePort(reserved);
+        reserved.Add(console); reserved.Add(console + 1);
+        int grpc = EmulatorLauncher.FindFreeTcpPort(8554, reserved);
         var opts = new LaunchOptions(ConsolePort: console, GrpcPort: grpc, NoSnapshot: !_set.SaveSnapshots);
         var session = _main.StartSession(inst, opts);
         var set = _set;

@@ -1,5 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Kitsune.App/Kitsune.App.csproj" />
+    <Project Path="src/Kitsune.Cli/Kitsune.Cli.csproj" />
+    <Project Path="src/Kitsune.Core/Kitsune.Core.csproj" />
   </Folder>
 </Solution>

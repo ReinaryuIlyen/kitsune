@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+    tags-ignore: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build
+        run: dotnet build Kitsune.slnx -c Release -warnaserror
+
+      - name: Keymap engine self-test
+        run: dotnet run --project src/Kitsune.Cli -c Release --no-build -- keymap selftest
+
+      - name: Macro self-test
+        run: dotnet run --project src/Kitsune.Cli -c Release --no-build -- macro selftest
+
+      - name: Validate bundled keymap profiles
+        shell: pwsh
+        run: |
+          Get-ChildItem profiles/*.json | ForEach-Object {
+            dotnet run --project src/Kitsune.Cli -c Release --no-build -- keymap validate $_.FullName
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Publish smoke test
+        run: dotnet publish src/Kitsune.App/Kitsune.App.csproj -c Release -r win-x64 --self-contained true -p:DebugType=none -o dist/Kitsune

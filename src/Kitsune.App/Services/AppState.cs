@@ -2,6 +2,7 @@ using System.IO;
 using System.Net.Http;
 using Kitsune.Core;
 using Kitsune.Core.Avd;
+using Kitsune.Core.Emulator;
 using Kitsune.Core.Host;
 using Kitsune.Core.Input;
 using Kitsune.Core.Sdk;
@@ -17,6 +18,7 @@ public sealed class AppState : IDisposable
     public HttpClient Http { get; }
     public ComponentManager Components { get; }
     public AvdManager Avds { get; }
+    public AdbTools Adb { get; }
     public HostInfo Host { get; private set; }
 
     public AppState()
@@ -27,6 +29,7 @@ public sealed class AppState : IDisposable
         Http = ComponentManager.CreateHttpClient();
         Components = new ComponentManager(Paths, Http);
         Avds = new AvdManager(Paths);
+        Adb = new AdbTools(Paths);
         Host = HostProbe.Probe();
         SeedProfiles();
     }

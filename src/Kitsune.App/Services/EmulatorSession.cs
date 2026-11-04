@@ -66,6 +66,9 @@ public sealed class EmulatorSession : IDisposable
         Recorder.SetGuestDisplay(GuestWidth, GuestHeight);
         MacroTarget = new GrpcMacroTarget(Control, GuestWidth, GuestHeight);
         Window = new WindowTracker(Running.WindowTitle);
+        // A ToggleKeymap key flips the user's switch, so the checkbox follows it and a text-field pause
+        // or a disabled engine never swallows the way back.
+        Engine.ToggleRequested += () => KeymapEnabled = !KeymapEnabled;
 
         _timer = new DispatcherTimer(DispatcherPriority.Normal) { Interval = TimeSpan.FromMilliseconds(33) };
         _timer.Tick += (_, _) => Tick();
@@ -147,10 +150,12 @@ public sealed class EmulatorSession : IDisposable
                 if (n.DisplayConfigurationsChangedNotification is { } dc)
                 {
                     var primary = dc.DisplayConfigurations.Displays.FirstOrDefault(d => d.Display == 0);
-                    if (primary is not null && primary.Width > 0)
+                    if (primary is not null && primary.Width > 0 && primary.Height > 0)
                     {
                         GuestWidth = (int)primary.Width; GuestHeight = (int)primary.Height;
                         Engine.SetGuestDisplay(GuestWidth, GuestHeight);
+                        Recorder.SetGuestDisplay(GuestWidth, GuestHeight);
+                        MacroTarget.GuestWidth = GuestWidth; MacroTarget.GuestHeight = GuestHeight;
                         Changed?.Invoke();
                     }
                 }
@@ -223,6 +228,10 @@ public sealed class EmulatorSession : IDisposable
         Recorder.AddCheckpoint(rgb, w, h, x, y, nw, nh, tolerance, timeoutMs, $"checkpoint {Recorder.StepCount + 1}");
         Changed?.Invoke();
     }
+
+    /// <summary>Installs a package on this instance through adb; the keymap and macros keep running meanwhile.</summary>
+    public Task<AdbTools.Result> InstallApkAsync(AdbTools adb, string file, IProgress<string>? progress = null, CancellationToken ct = default) =>
+        adb.InstallAsync(Running.AdbSerial, file, progress, ct);
 
     public async Task StopAsync()
     {

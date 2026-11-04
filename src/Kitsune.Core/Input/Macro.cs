@@ -100,14 +100,20 @@ public sealed class Macro
                 case MacroStepKind.WaitForScreen:
                     if (string.IsNullOrEmpty(s.Template) || s.TemplateW <= 0 || s.TemplateH <= 0 || s.FrameW <= 0 || s.FrameH <= 0)
                         problems.Add($"{at}: missing reference image.");
-                    else if (Convert.FromBase64String(s.Template).Length != s.TemplateW * s.TemplateH)
-                        problems.Add($"{at}: reference image size does not match TemplateW x TemplateH.");
+                    else if (TemplateLength(s.Template) != s.TemplateW * s.TemplateH)
+                        problems.Add($"{at}: reference image is not valid base64 of TemplateW x TemplateH bytes.");
                     if (s.W <= 0 || s.H <= 0 || s.X < 0 || s.Y < 0 || s.X + s.W > 1.0001 || s.Y + s.H > 1.0001) problems.Add($"{at}: region must lie within the screen.");
                     break;
             }
         }
         if (down.Count > 0) problems.Add($"touch(es) {string.Join(',', down)} are still down at the end; the player will release them, but the recording is probably truncated.");
         return problems;
+
+        static int TemplateLength(string base64)
+        {
+            try { return Convert.FromBase64String(base64).Length; }
+            catch (FormatException) { return -1; }
+        }
     }
 }
 

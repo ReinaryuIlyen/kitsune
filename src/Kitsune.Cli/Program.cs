@@ -28,6 +28,9 @@ internal static class Program
                 "delete" => Delete(rest),
                 "plan" => Plan(rest),
                 "launch" => await Launch(rest),
+                "stop" => await Stop(rest),
+                "apk" => await Apk(rest),
+                "adb" => await Adb(rest),
                 "ctl" => await Ctl(rest),
                 "reroll" => await Reroll(rest),
                 "macro" => await MacroCmd(rest),
@@ -64,6 +67,9 @@ internal static class Program
         Console.WriteLine("  plan <name>                         Print the exact emulator command line and environment");
         Console.WriteLine("  launch <name> [--cold] [--wipe] [--headless] [--wait] [--attach]");
         Console.WriteLine("                                      --wait blocks until the guest has booted; --attach keeps running until the emulator exits");
+        Console.WriteLine("  stop <name> [--force]               Shut the running instance down cleanly (--force kills it)");
+        Console.WriteLine("  apk <name> <file>...                Install .apk / .apks / .xapk files on the running instance");
+        Console.WriteLine("  adb <name> [args...]                Run adb against the running instance (no args: interactive shell)");
         Console.WriteLine("  ctl <grpc-port> status|displays|screenshot <file.png>|tap X Y|swipe X0 Y0 X1 Y1 [ms]|key <AndroidKey>|text <string>|shutdown");
         Console.WriteLine("                                      Talk to a running instance over its gRPC control port");
         Console.WriteLine("  keymap validate <file.json>");
@@ -93,11 +99,21 @@ internal static class Program
 
     private static bool Flag(string[] args, string name) => Array.IndexOf(args, name) >= 0;
 
+    /// <summary>Options that take no value, so the word after them is a positional argument, not their value.</summary>
+    private static readonly HashSet<string> Switches = ["--cold", "--wipe", "--headless", "--wait", "--attach", "--no-image", "--snapshots", "--force"];
+
+    private static string[] Positionals(string[] args) =>
+        args.Where((a, i) => !a.StartsWith("--") && (i == 0 || !args[i - 1].StartsWith("--") || Switches.Contains(args[i - 1]))).ToArray();
+
     private static string Positional(string[] args, int index, string what)
     {
-        var positional = args.Where((a, i) => !a.StartsWith("--") && (i == 0 || !args[i - 1].StartsWith("--"))).ToArray();
+        var positional = Positionals(args);
         return positional.Length > index ? positional[index] : throw new ArgumentException($"Missing {what}.");
     }
+
+    /// <summary>The emulator running the named instance, or a clear error.</summary>
+    private static DiscoveredEmulator Running(string name) =>
+        EmulatorDiscovery.Find(name) ?? throw new ArgumentException($"'{name}' is not running (see `kitsune ps`).");
 
     private static int Probe()
     {
@@ -288,6 +304,62 @@ internal static class Program
         return 0;
     }
 
+    private static async Task<int> Stop(string[] args)
+    {
+        var name = Positional(args, 0, "instance name");
+        var found = Running(name);
+        using var process = System.Diagnostics.Process.GetProcessById(found.Pid);
+        if (!Flag(args, "--force") && found.GrpcPort > 0)
+        {
+            await using var control = new EmulatorControl(found.GrpcPort);
+            try
+            {
+                await control.ShutdownAsync();
+                Console.WriteLine($"Shutdown requested on {found.Avd} (pid {found.Pid}); waiting for it to exit...");
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                await process.WaitForExitAsync(timeout.Token);
+                Console.WriteLine("Stopped.");
+                return 0;
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or Grpc.Core.RpcException)
+            {
+                Console.WriteLine($"Clean shutdown did not complete ({(ex is OperationCanceledException ? "timed out" : ex.Message)}); killing it.");
+            }
+        }
+        try { process.Kill(entireProcessTree: true); await process.WaitForExitAsync(); }
+        catch (InvalidOperationException) { /* already gone */ }
+        Console.WriteLine($"Killed {found.Avd} (pid {found.Pid}).");
+        return 0;
+    }
+
+    private static async Task<int> Apk(string[] args)
+    {
+        var paths = KitsunePaths.Resolve();
+        var positional = Positionals(args);
+        if (positional.Length < 2) throw new ArgumentException("Usage: kitsune apk <instance> <file.apk|.apks|.xapk>...");
+        var found = Running(positional[0]);
+        var adb = new AdbTools(paths);
+        var progress = new Progress<string>(m => Console.WriteLine("  " + m));
+        int failures = 0;
+        foreach (var file in positional.Skip(1))
+        {
+            Console.WriteLine($"{Path.GetFileName(file)} -> emulator-{found.ConsolePort}");
+            var r = await adb.InstallAsync($"emulator-{found.ConsolePort}", Path.GetFullPath(file), progress);
+            if (r.Output.Length > 0) Console.WriteLine("  " + r.Output.Replace("\n", "\n  "));
+            if (!r.Ok) failures++;
+        }
+        return failures == 0 ? 0 : 3;
+    }
+
+    private static async Task<int> Adb(string[] args)
+    {
+        var paths = KitsunePaths.Resolve();
+        if (args.Length == 0) throw new ArgumentException("Usage: kitsune adb <instance> [adb arguments...]");
+        var found = Running(args[0]);
+        var rest = args.Skip(1).ToArray();
+        return await new AdbTools(paths).PassThroughAsync($"emulator-{found.ConsolePort}", rest.Length == 0 ? ["shell"] : rest);
+    }
+
     private static async Task<int> Ctl(string[] args)
     {
         if (args.Length < 2 || !int.TryParse(args[0], out var port)) { Usage(); return 1; }
@@ -314,6 +386,7 @@ internal static class Program
             }
             case "screenshot":
             {
+                if (a.Length == 0) throw new ArgumentException("Usage: kitsune ctl <port> screenshot <file.png>");
                 var png = await control.ScreenshotPngAsync();
                 await File.WriteAllBytesAsync(a[0], png);
                 Console.WriteLine($"{png.Length} bytes -> {a[0]}");

@@ -65,6 +65,12 @@ public sealed class ComponentManager
             if (pkg is null) throw new InvalidOperationException("The SDK repository is missing a required package.");
             if (_installer.IsInstalled(pkg)) { progress?.Report(new DownloadProgress(pkg.Path, 1, 1, "up to date")); continue; }
             if (!update && _installer.IsInstalled(pkg.Path)) continue;
+            // Replacing emulator/ or platform-tools/ swaps the directory out from under any running process;
+            // Windows refuses to move files that are open, and the failure would only show up half-way through.
+            if (pkg.Path is PackageSelector.EmulatorPath or PackageSelector.PlatformToolsPath && Emulator.EmulatorDiscovery.Discover() is { Count: > 0 } running)
+                throw new InvalidOperationException($"Stop the running emulator(s) first ({string.Join(", ", running.Select(r => r.Avd))}): {pkg.Path} cannot be replaced while in use.");
+            // The adb server is a background adb.exe holding its own binary open; it restarts on the next adb call.
+            if (pkg.Path == PackageSelector.PlatformToolsPath) await new Emulator.AdbTools(_paths).KillServerAsync(ct).ConfigureAwait(false);
             await _installer.InstallAsync(pkg, progress, ct).ConfigureAwait(false);
         }
         WriteEmulatorHomeDefaults();
@@ -104,7 +110,8 @@ public sealed class ComponentManager
             ConnectTimeout = TimeSpan.FromSeconds(20),
         };
         var http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
-        http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Kitsune", "0.1"));
+        var version = typeof(ComponentManager).Assembly.GetName().Version is { } v ? $"{v.Major}.{v.Minor}.{v.Build}" : "0";
+        http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Kitsune", version));
         return http;
     }
 }

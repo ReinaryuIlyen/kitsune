@@ -37,10 +37,17 @@ public sealed class KeymapEngine : IDisposable
 
     public event Action<bool>? AimModeChanged;
     public event Action<bool>? EnabledChanged;
+    /// <summary>
+    /// A ToggleKeymap key was pressed. When a handler is attached it owns the on/off decision (the launcher
+    /// flips the user's switch so text-field pauses and the checkbox stay coherent); otherwise the engine
+    /// toggles <see cref="Enabled"/> itself.
+    /// </summary>
+    public event Action? ToggleRequested;
 
     public KeymapEngine(IInputSink sink)
     {
         _sink = sink;
+        TimerResolution.Acquire();
         _ticker = Task.Factory.StartNew(TickLoop, TaskCreationOptions.LongRunning);
     }
 
@@ -102,7 +109,12 @@ public sealed class KeymapEngine : IDisposable
             foreach (var b in _profile.Bindings)
             {
                 if (b.Kind != BindingKind.ToggleKeymap || !HostKeys.TryParse(b.Key, out var tk) || !HostKeys.Matches(tk, vk)) continue;
-                if (down) { var next = !_enabled; _ = Task.Run(() => Enabled = next); }
+                // Off the hook thread and outside the lock: the Enabled setter takes _gate and raises events.
+                if (down)
+                {
+                    if (ToggleRequested is { } handler) _ = Task.Run(handler);
+                    else { var next = !_enabled; _ = Task.Run(() => Enabled = next); }
+                }
                 return true;
             }
             if (!_enabled) return false;
@@ -318,6 +330,32 @@ public sealed class KeymapEngine : IDisposable
         try { _ticker.Wait(500); } catch { }
         ReleaseAll();
         _cts.Dispose();
+        TimerResolution.Release();
+    }
+
+    /// <summary>
+    /// Windows sleeps in multiples of the system timer period, 15.6 ms by default, which would turn the
+    /// 4 ms gesture clock into a 64 Hz one. Requesting 1 ms while an engine exists keeps swipes, autofire
+    /// and mouse-look at the rate the profile asks for. Reference counted; a no-op off Windows.
+    /// </summary>
+    private static class TimerResolution
+    {
+        private static int _count;
+
+        public static void Acquire()
+        {
+            if (!OperatingSystem.IsWindows()) return;
+            if (Interlocked.Increment(ref _count) == 1) { try { timeBeginPeriod(1); } catch { } }
+        }
+
+        public static void Release()
+        {
+            if (!OperatingSystem.IsWindows()) return;
+            if (Interlocked.Decrement(ref _count) == 0) { try { timeEndPeriod(1); } catch { } }
+        }
+
+        [System.Runtime.InteropServices.DllImport("winmm.dll")] private static extern uint timeBeginPeriod(uint ms);
+        [System.Runtime.InteropServices.DllImport("winmm.dll")] private static extern uint timeEndPeriod(uint ms);
     }
 
     // ---- gestures ----------------------------------------------------------------------------
